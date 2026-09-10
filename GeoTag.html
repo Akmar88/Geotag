@@ -1,0 +1,454 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<meta name="theme-color" content="#0f3d2e">
+<title>GeoTag</title>
+<style>
+  :root{
+    --bg:#f4f6f4;
+    --card:#ffffff;
+    --text:#14201a;
+    --muted:#5b6b62;
+    --accent:#1f7a54;
+    --accent-dark:#155c3f;
+    --border:#e1e6e2;
+    --chip-bg:#e8f3ec;
+    --chip-text:#155c3f;
+    --err-bg:#fdecec;
+    --err-text:#9b2c2c;
+    --shadow:0 2px 10px rgba(20,32,26,0.06);
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#0f1512;
+      --card:#182019;
+      --text:#e9efe9;
+      --muted:#93a39a;
+      --accent:#3ecb8c;
+      --accent-dark:#2e9c6b;
+      --border:#263129;
+      --chip-bg:#1c3226;
+      --chip-text:#79e0ac;
+      --err-bg:#3a1c1c;
+      --err-text:#ff9b9b;
+      --shadow:0 2px 12px rgba(0,0,0,0.35);
+    }
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    background:var(--bg);
+    color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    min-height:100vh;
+    padding-bottom:40px;
+  }
+  header{
+    padding:22px 20px 14px;
+    text-align:center;
+  }
+  header h1{
+    margin:0;
+    font-size:1.4rem;
+    font-weight:700;
+    letter-spacing:0.02em;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    gap:8px;
+  }
+  header p{
+    margin:4px 0 0;
+    color:var(--muted);
+    font-size:0.82rem;
+  }
+  main{
+    max-width:520px;
+    margin:0 auto;
+    padding:0 16px;
+  }
+  .card{
+    background:var(--card);
+    border:1px solid var(--border);
+    border-radius:16px;
+    box-shadow:var(--shadow);
+    padding:18px 18px;
+    margin-bottom:16px;
+  }
+  .loc-card{
+    text-align:center;
+  }
+  .coords{
+    font-size:1.5rem;
+    font-weight:700;
+    letter-spacing:0.01em;
+    word-break:break-word;
+  }
+  .coords .sep{
+    color:var(--muted);
+    font-weight:400;
+    margin:0 4px;
+  }
+  .meta-row{
+    display:flex;
+    justify-content:center;
+    gap:16px;
+    margin-top:8px;
+    color:var(--muted);
+    font-size:0.8rem;
+    flex-wrap:wrap;
+  }
+  button{
+    font-family:inherit;
+    font-size:0.95rem;
+    font-weight:600;
+    border:none;
+    border-radius:12px;
+    padding:12px 20px;
+    cursor:pointer;
+    background:var(--accent);
+    color:#ffffff;
+    width:100%;
+    margin-top:14px;
+    transition:background 0.15s ease, transform 0.05s ease;
+  }
+  button:active{
+    background:var(--accent-dark);
+    transform:scale(0.99);
+  }
+  button:disabled{
+    opacity:0.6;
+    cursor:default;
+  }
+  .status{
+    text-align:center;
+    color:var(--muted);
+    font-size:0.85rem;
+    margin:6px 0 14px;
+    min-height:1.1em;
+  }
+  .status.error{
+    color:var(--err-text);
+    background:var(--err-bg);
+    border-radius:10px;
+    padding:10px 12px;
+  }
+  .section-title{
+    font-size:0.78rem;
+    text-transform:uppercase;
+    letter-spacing:0.06em;
+    color:var(--muted);
+    margin:22px 2px 8px;
+    font-weight:700;
+  }
+  .feature{
+    display:flex;
+    gap:12px;
+    align-items:flex-start;
+  }
+  .feature + .feature{
+    margin-top:0;
+  }
+  .feature .icon{
+    font-size:1.6rem;
+    line-height:1;
+    flex-shrink:0;
+    margin-top:2px;
+  }
+  .feature .body{
+    flex:1;
+    min-width:0;
+  }
+  .feature .name{
+    font-weight:700;
+    font-size:1rem;
+    margin-bottom:4px;
+  }
+  .tags{
+    display:flex;
+    flex-wrap:wrap;
+    gap:6px;
+    margin-bottom:6px;
+  }
+  .tag-chip{
+    background:var(--chip-bg);
+    color:var(--chip-text);
+    font-size:0.76rem;
+    font-weight:600;
+    padding:4px 9px;
+    border-radius:999px;
+    white-space:nowrap;
+  }
+  .feature .sub{
+    font-size:0.76rem;
+    color:var(--muted);
+  }
+  .feature .sub a{
+    color:var(--muted);
+    text-decoration:underline;
+  }
+  .empty{
+    text-align:center;
+    color:var(--muted);
+    font-size:0.9rem;
+    padding:10px 4px;
+  }
+  .spinner{
+    width:20px;height:20px;
+    border:2.5px solid var(--border);
+    border-top-color:var(--accent);
+    border-radius:50%;
+    display:inline-block;
+    animation:spin 0.7s linear infinite;
+    vertical-align:middle;
+    margin-right:8px;
+  }
+  @keyframes spin{to{transform:rotate(360deg);}}
+  footer{
+    text-align:center;
+    color:var(--muted);
+    font-size:0.72rem;
+    padding:20px 24px 0;
+    line-height:1.5;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>🌿 GeoTag</h1>
+  <p>What ground are you standing on?</p>
+</header>
+
+<main>
+  <div class="card loc-card">
+    <div id="coords" class="coords">— , —</div>
+    <div id="metaRow" class="meta-row"></div>
+    <button id="locateBtn">Get My Location</button>
+  </div>
+
+  <div id="status" class="status"></div>
+
+  <div id="resultsWrap" style="display:none;">
+    <div class="section-title">Nature &amp; Landuse Here</div>
+    <div id="results" class="card"></div>
+  </div>
+
+  <footer>
+    Tip: add this page to your Home Screen (Chrome menu → "Add to Home screen") so it opens like an app.<br>
+    Location data from your device · Map data © OpenStreetMap contributors, via Overpass API.
+  </footer>
+</main>
+
+<script>
+(function(){
+  const locateBtn = document.getElementById('locateBtn');
+  const coordsEl = document.getElementById('coords');
+  const metaRowEl = document.getElementById('metaRow');
+  const statusEl = document.getElementById('status');
+  const resultsWrap = document.getElementById('resultsWrap');
+  const resultsEl = document.getElementById('results');
+
+  const OVERPASS_ENDPOINT = 'https://overpass-api.de/api/interpreter';
+  const SEARCH_RADIUS_M = 80;
+
+  const NATURAL_ICONS = {
+    wood:'🌲', forest:'🌲', tree_row:'🌳', scrub:'🌱', heath:'🌾',
+    grassland:'🌾', wetland:'🌿', water:'💧', bay:'💧', beach:'🏖️',
+    sand:'🏖️', bare_rock:'🪨', rock:'🪨', cliff:'🪨', glacier:'🧊',
+    valley:'⛰️', peak:'⛰️', scree:'🪨'
+  };
+  const LANDUSE_ICONS = {
+    forest:'🌲', farmland:'🌾', farmyard:'🌾', orchard:'🌳', vineyard:'🍇',
+    meadow:'🌾', grass:'🌱', residential:'🏘️', industrial:'🏭',
+    commercial:'🏢', retail:'🏬', cemetery:'⚰️', quarry:'⛏️',
+    recreation_ground:'🌳', allotments:'🌱', reservoir:'💧',
+    railway:'🚆', military:'🎖️'
+  };
+
+  function setStatus(msg, isError){
+    statusEl.textContent = msg || '';
+    statusEl.className = 'status' + (isError ? ' error' : '');
+  }
+
+  function fmtCoord(v){
+    return v.toFixed(6);
+  }
+
+  locateBtn.addEventListener('click', locate);
+
+  function locate(){
+    if(!('geolocation' in navigator)){
+      setStatus('Geolocation is not available in this browser.', true);
+      return;
+    }
+    locateBtn.disabled = true;
+    resultsWrap.style.display = 'none';
+    setStatus('📍 Getting your location…');
+
+    navigator.geolocation.getCurrentPosition(onPosition, onPositionError, {
+      enableHighAccuracy: true,
+      timeout: 15000,
+      maximumAge: 0
+    });
+  }
+
+  function onPositionError(err){
+    locateBtn.disabled = false;
+    let msg = 'Could not get your location.';
+    if(err.code === err.PERMISSION_DENIED){
+      msg = 'Location permission denied. Allow location access for this page and try again.';
+    } else if(err.code === err.TIMEOUT){
+      msg = 'Location request timed out. Try again (works best outdoors).';
+    }
+    setStatus(msg, true);
+  }
+
+  function onPosition(pos){
+    const lat = pos.coords.latitude;
+    const lon = pos.coords.longitude;
+    const acc = pos.coords.accuracy;
+
+    coordsEl.textContent = fmtCoord(lat) + '°' + (lat>=0?'N':'S') + '  ' + fmtCoord(Math.abs(lon)) + '°' + (lon>=0?'E':'W');
+    metaRowEl.textContent = '± ' + Math.round(acc) + ' m accuracy · ' + new Date(pos.timestamp).toLocaleTimeString();
+
+    statusEl.innerHTML = '<span class="spinner"></span> Looking up nature &amp; landuse…';
+    statusEl.className = 'status';
+
+    fetchOverpass(lat, lon)
+      .then(elements => {
+        const matches = extractMatches(elements, lat, lon);
+        renderResults(matches);
+        setStatus('');
+      })
+      .catch(e => {
+        console.error(e);
+        setStatus('Could not reach OpenStreetMap data (no internet, or the Overpass server is busy). Try again in a moment.', true);
+      })
+      .finally(() => { locateBtn.disabled = false; });
+  }
+
+  function buildQuery(lat, lon){
+    return '[out:json][timeout:25];(' +
+      'way(around:' + SEARCH_RADIUS_M + ',' + lat + ',' + lon + ')["natural"];' +
+      'way(around:' + SEARCH_RADIUS_M + ',' + lat + ',' + lon + ')["landuse"];' +
+      'relation(around:' + SEARCH_RADIUS_M + ',' + lat + ',' + lon + ')["natural"];' +
+      'relation(around:' + SEARCH_RADIUS_M + ',' + lat + ',' + lon + ')["landuse"];' +
+      ');out geom;';
+  }
+
+  function fetchOverpass(lat, lon){
+    const query = buildQuery(lat, lon);
+    return fetch(OVERPASS_ENDPOINT, {
+      method: 'POST',
+      headers: {'Content-Type':'application/x-www-form-urlencoded'},
+      body: 'data=' + encodeURIComponent(query)
+    }).then(r => {
+      if(!r.ok) throw new Error('Overpass HTTP ' + r.status);
+      return r.json();
+    }).then(json => json.elements || []);
+  }
+
+  // Ray-casting point-in-polygon. ring = array of {lat, lon}
+  function pointInRing(lat, lon, ring){
+    let inside = false;
+    for(let i = 0, j = ring.length - 1; i < ring.length; j = i++){
+      const yi = ring[i].lat, xi = ring[i].lon;
+      const yj = ring[j].lat, xj = ring[j].lon;
+      const intersect = ((yi > lat) !== (yj > lat)) &&
+        (lon < (xj - xi) * (lat - yi) / (yj - yi) + xi);
+      if(intersect) inside = !inside;
+    }
+    return inside;
+  }
+
+  function isClosed(geom){
+    if(!geom || geom.length < 4) return false;
+    const a = geom[0], b = geom[geom.length-1];
+    return a.lat === b.lat && a.lon === b.lon;
+  }
+
+  function relevantTags(tags){
+    const out = [];
+    if(!tags) return out;
+    if(tags.natural) out.push({key:'natural', value: tags.natural, icon: NATURAL_ICONS[tags.natural] || '🍃'});
+    if(tags.landuse) out.push({key:'landuse', value: tags.landuse, icon: LANDUSE_ICONS[tags.landuse] || '📍'});
+    return out;
+  }
+
+  function extractMatches(elements, lat, lon){
+    const matches = [];
+    const seen = new Set();
+
+    for(const el of elements){
+      const key = el.type + '/' + el.id;
+      if(seen.has(key)) continue;
+
+      let contains = false;
+
+      if(el.type === 'way' && el.geometry){
+        if(isClosed(el.geometry) && pointInRing(lat, lon, el.geometry)){
+          contains = true;
+        }
+      } else if(el.type === 'relation' && el.members){
+        const outerPts = [];
+        const innerPts = [];
+        for(const m of el.members){
+          if(!m.geometry) continue;
+          if(m.role === 'inner') innerPts.push(...m.geometry);
+          else outerPts.push(...m.geometry);
+        }
+        if(outerPts.length >= 4 && pointInRing(lat, lon, outerPts)){
+          const inHole = innerPts.length >= 4 && pointInRing(lat, lon, innerPts);
+          if(!inHole) contains = true;
+        }
+      }
+
+      if(contains){
+        const tags = relevantTags(el.tags);
+        if(tags.length){
+          seen.add(key);
+          matches.push({
+            type: el.type,
+            id: el.id,
+            name: (el.tags && el.tags.name) || null,
+            tags: tags
+          });
+        }
+      }
+    }
+    return matches;
+  }
+
+  function renderResults(matches){
+    resultsWrap.style.display = 'block';
+    if(!matches.length){
+      resultsEl.innerHTML = '<div class="empty">No mapped nature or landuse areas found right at this point.</div>';
+      return;
+    }
+    resultsEl.innerHTML = matches.map(m => {
+      const chips = m.tags.map(t => '<span class="tag-chip">' + t.key + ' = ' + escapeHtml(t.value) + '</span>').join('');
+      const icon = m.tags[0].icon;
+      const title = m.name ? escapeHtml(m.name) : (m.type === 'way' ? 'Unnamed way' : 'Unnamed relation');
+      const osmUrl = 'https://www.openstreetmap.org/' + m.type + '/' + m.id;
+      return '<div class="feature">' +
+        '<div class="icon">' + icon + '</div>' +
+        '<div class="body">' +
+          '<div class="name">' + title + '</div>' +
+          '<div class="tags">' + chips + '</div>' +
+          '<div class="sub"><a href="' + osmUrl + '" target="_blank" rel="noopener">' + m.type + ' #' + m.id + ' on OSM ↗</a></div>' +
+        '</div>' +
+      '</div>';
+    }).join('<hr style="border:none;border-top:1px solid var(--border);margin:14px 0;">');
+  }
+
+  function escapeHtml(s){
+    return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  }
+})();
+</script>
+
+</body>
+</html>
