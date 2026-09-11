@@ -343,7 +343,11 @@
             color = COLORS[categories[cat]] || NODATA_COLOR;
           }
         }
-        const px = (dr + GRID_RADIUS) * 21 + (dc + GRID_RADIUS);
+        // Canvas row 0 is the top of the image, so north (larger dr) must map
+        // to the smallest pixel row for a conventional north-up display.
+        const pixelRow = GRID_RADIUS - dr;
+        const pixelCol = dc + GRID_RADIUS;
+        const px = pixelRow * 21 + pixelCol;
         const [rr, gg, bb] = hexToRgb(color);
         imgData.data[px*4] = rr;
         imgData.data[px*4+1] = gg;
