@@ -1,0 +1,403 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<meta name="theme-color" content="#0f3d2e">
+<title>Terrain Grid</title>
+<style>
+  :root{
+    --bg:#f4f6f4;
+    --card:#ffffff;
+    --text:#14201a;
+    --muted:#5b6b62;
+    --accent:#1f7a54;
+    --border:#e1e6e2;
+    --err-bg:#fdecec;
+    --err-text:#9b2c2c;
+    --shadow:0 2px 10px rgba(20,32,26,0.06);
+    --nodata:#e7e9e7;
+    --center-outline:#14201a;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#0f1512;
+      --card:#182019;
+      --text:#e9efe9;
+      --muted:#93a39a;
+      --accent:#3ecb8c;
+      --border:#263129;
+      --err-bg:#3a1c1c;
+      --err-text:#ff9b9b;
+      --shadow:0 2px 12px rgba(0,0,0,0.35);
+      --nodata:#232b26;
+      --center-outline:#f4f6f4;
+    }
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    background:var(--bg);
+    color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    min-height:100vh;
+    padding-bottom:40px;
+  }
+  header{
+    padding:22px 20px 14px;
+    text-align:center;
+  }
+  header h1{
+    margin:0;
+    font-size:1.4rem;
+    font-weight:700;
+    letter-spacing:0.02em;
+  }
+  header p{
+    margin:4px 0 0;
+    color:var(--muted);
+    font-size:0.82rem;
+  }
+  main{
+    max-width:420px;
+    margin:0 auto;
+    padding:0 16px;
+  }
+  .card{
+    background:var(--card);
+    border:1px solid var(--border);
+    border-radius:16px;
+    box-shadow:var(--shadow);
+    padding:20px 20px 18px;
+    margin-bottom:16px;
+    text-align:center;
+  }
+  #gridCanvas{
+    width:100%;
+    max-width:336px;
+    aspect-ratio:1/1;
+    image-rendering:pixelated;
+    image-rendering:crisp-edges;
+    border-radius:8px;
+    border:1px solid var(--border);
+    display:block;
+    margin:0 auto;
+  }
+  .label-row{
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    gap:10px;
+    margin-top:16px;
+  }
+  .swatch{
+    width:16px;
+    height:16px;
+    border-radius:4px;
+    border:1px solid rgba(0,0,0,0.15);
+    flex-shrink:0;
+  }
+  .biome-name{
+    font-size:1.15rem;
+    font-weight:700;
+  }
+  .meta-row{
+    margin-top:6px;
+    color:var(--muted);
+    font-size:0.78rem;
+  }
+  button{
+    font-family:inherit;
+    font-size:0.95rem;
+    font-weight:600;
+    border:none;
+    border-radius:12px;
+    padding:12px 20px;
+    cursor:pointer;
+    background:var(--accent);
+    color:#ffffff;
+    width:100%;
+    margin-top:16px;
+  }
+  button:active{
+    opacity:0.85;
+  }
+  button:disabled{
+    opacity:0.6;
+    cursor:default;
+  }
+  .status{
+    text-align:center;
+    color:var(--muted);
+    font-size:0.85rem;
+    margin:6px 0 14px;
+    min-height:1.1em;
+  }
+  .status.error{
+    color:var(--err-text);
+    background:var(--err-bg);
+    border-radius:10px;
+    padding:10px 12px;
+  }
+  .spinner{
+    width:16px;height:16px;
+    border:2.5px solid var(--border);
+    border-top-color:var(--accent);
+    border-radius:50%;
+    display:inline-block;
+    animation:spin 0.7s linear infinite;
+    vertical-align:middle;
+    margin-right:8px;
+  }
+  @keyframes spin{to{transform:rotate(360deg);}}
+  footer{
+    text-align:center;
+    color:var(--muted);
+    font-size:0.72rem;
+    padding:20px 24px 0;
+    line-height:1.5;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Terrain Grid</h1>
+  <p>Live 21&times;21 biome view centered on you</p>
+</header>
+
+<main>
+  <div id="status" class="status">Loading terrain database…</div>
+
+  <div class="card">
+    <canvas id="gridCanvas" width="21" height="21"></canvas>
+    <div class="label-row">
+      <div id="swatch" class="swatch" style="background:var(--nodata);"></div>
+      <div id="biomeName" class="biome-name">—</div>
+    </div>
+    <div id="metaRow" class="meta-row">&nbsp;</div>
+    <button id="refreshBtn">Refresh Now</button>
+  </div>
+
+  <footer>
+    Updates automatically every 30 seconds. Terrain data: Budapest OSM extract, 25m grid.<br>
+    Map data © OpenStreetMap contributors.
+  </footer>
+</main>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.3/sql-wasm.js"></script>
+<script>
+(function(){
+  const statusEl = document.getElementById('status');
+  const canvas = document.getElementById('gridCanvas');
+  const ctx = canvas.getContext('2d');
+  const swatchEl = document.getElementById('swatch');
+  const biomeNameEl = document.getElementById('biomeName');
+  const metaRowEl = document.getElementById('metaRow');
+  const refreshBtn = document.getElementById('refreshBtn');
+
+  const DB_URL = 'budapest_terrain.sqlite';
+  const GRID_RADIUS = 10; // -> 21x21
+  const REFRESH_MS = 30000;
+
+  // Colors matched by eye to the provided legend image.
+  const COLORS = {
+    'Grassy':      '#d6e8a8',
+    'Residential': '#cbaa78',
+    'Forest':      '#1e5631',
+    'Park':        '#7cc36e',
+    'Cemetery':    '#a9a9a9',
+    'River':       '#4a90d9',
+    'Lake':        '#1a3c6e'
+  };
+  const NODATA_COLOR = '#c9cdc9';
+
+  let db = null;
+  let meta = null;       // {origin_lon, origin_lat, mlon, mlat, cellSize, width, height}
+  let categories = null; // {id: name}
+  let refreshTimer = null;
+
+  function setStatus(html, isError){
+    statusEl.innerHTML = html || '';
+    statusEl.className = 'status' + (isError ? ' error' : '');
+  }
+
+  async function init(){
+    try{
+      const SQL = await initSqlJs({
+        locateFile: file => 'https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.3/' + file
+      });
+      const buf = await fetch(DB_URL).then(r => {
+        if(!r.ok) throw new Error('DB fetch HTTP ' + r.status);
+        return r.arrayBuffer();
+      });
+      db = new SQL.Database(new Uint8Array(buf));
+
+      const metaRows = db.exec('SELECT key, value FROM meta')[0].values;
+      const m = {};
+      metaRows.forEach(([k, v]) => { m[k] = v; });
+      meta = {
+        originLon: parseFloat(m.origin_lon),
+        originLat: parseFloat(m.origin_lat),
+        mLon: parseFloat(m.meters_per_degree_lon),
+        mLat: parseFloat(m.meters_per_degree_lat),
+        cellSize: parseFloat(m.cell_size_m),
+        width: parseInt(m.grid_width_cols, 10),
+        height: parseInt(m.grid_height_rows, 10)
+      };
+
+      categories = {};
+      db.exec('SELECT id, name FROM categories')[0].values.forEach(([id, name]) => {
+        categories[id] = name;
+      });
+
+      setStatus('');
+      drawEmptyGrid();
+      locate();
+      refreshTimer = setInterval(locate, REFRESH_MS);
+    } catch(e){
+      console.error(e);
+      setStatus('Could not load the terrain database. Check your connection and reload.', true);
+    }
+  }
+
+  function drawEmptyGrid(){
+    ctx.fillStyle = NODATA_COLOR;
+    ctx.fillRect(0, 0, 21, 21);
+  }
+
+  refreshBtn.addEventListener('click', locate);
+
+  function locate(){
+    if(!('geolocation' in navigator)){
+      setStatus('Geolocation is not available in this browser.', true);
+      return;
+    }
+    refreshBtn.disabled = true;
+    setStatus('<span class="spinner"></span> Getting your location…');
+
+    navigator.geolocation.getCurrentPosition(onPosition, onPositionError, {
+      enableHighAccuracy: true,
+      timeout: 15000,
+      maximumAge: 0
+    });
+  }
+
+  function onPositionError(err){
+    refreshBtn.disabled = false;
+    let msg = 'Could not get your location.';
+    if(err.code === err.PERMISSION_DENIED){
+      msg = 'Location permission denied. Allow location access for this page and try again.';
+    } else if(err.code === err.TIMEOUT){
+      msg = 'Location request timed out. Try again outdoors.';
+    }
+    setStatus(msg, true);
+  }
+
+  function onPosition(pos){
+    refreshBtn.disabled = false;
+    const lat = pos.coords.latitude;
+    const lon = pos.coords.longitude;
+    metaRowEl.textContent = new Date(pos.timestamp).toLocaleTimeString() + ' · ±' + Math.round(pos.coords.accuracy) + ' m';
+    setStatus('');
+    updateGrid(lat, lon);
+  }
+
+  function updateGrid(lat, lon){
+    const xM = (lon - meta.originLon) * meta.mLon;
+    const yM = (lat - meta.originLat) * meta.mLat;
+    const col0 = Math.floor(xM / meta.cellSize);
+    const row0 = Math.floor(yM / meta.cellSize);
+
+    const clauses = [];
+    const params = [];
+    for(let r = row0 - GRID_RADIUS; r <= row0 + GRID_RADIUS; r++){
+      if(r < 0 || r >= meta.height) continue;
+      const cLo = Math.max(0, col0 - GRID_RADIUS);
+      const cHi = Math.min(meta.width - 1, col0 + GRID_RADIUS);
+      if(cLo > cHi) continue;
+      clauses.push('cell_id BETWEEN ? AND ?');
+      params.push(r * meta.width + cLo, r * meta.width + cHi);
+    }
+
+    const data = new Map();
+    if(clauses.length){
+      const stmt = db.prepare('SELECT cell_id, category FROM cells WHERE ' + clauses.join(' OR '));
+      stmt.bind(params);
+      while(stmt.step()){
+        const row = stmt.get();
+        data.set(row[0], row[1]);
+      }
+      stmt.free();
+    }
+
+    const imgData = ctx.createImageData(21, 21);
+    for(let dr = -GRID_RADIUS; dr <= GRID_RADIUS; dr++){
+      for(let dc = -GRID_RADIUS; dc <= GRID_RADIUS; dc++){
+        const r = row0 + dr, c = col0 + dc;
+        let color = NODATA_COLOR;
+        if(r >= 0 && r < meta.height && c >= 0 && c < meta.width){
+          const cellId = r * meta.width + c;
+          const cat = data.get(cellId);
+          if(cat !== undefined){
+            color = COLORS[categories[cat]] || NODATA_COLOR;
+          }
+        }
+        const px = (dr + GRID_RADIUS) * 21 + (dc + GRID_RADIUS);
+        const [rr, gg, bb] = hexToRgb(color);
+        imgData.data[px*4] = rr;
+        imgData.data[px*4+1] = gg;
+        imgData.data[px*4+2] = bb;
+        imgData.data[px*4+3] = 255;
+      }
+    }
+    ctx.putImageData(imgData, 0, 0);
+    drawCenterOutline();
+
+    const centerId = row0 * meta.width + col0;
+    const centerCat = data.get(centerId);
+    if(centerCat !== undefined){
+      const name = categories[centerCat];
+      swatchEl.style.background = COLORS[name] || NODATA_COLOR;
+      biomeNameEl.textContent = name;
+    } else {
+      swatchEl.style.background = NODATA_COLOR;
+      biomeNameEl.textContent = 'Outside mapped area';
+    }
+  }
+
+  function drawCenterOutline(){
+    const cx = GRID_RADIUS, cy = GRID_RADIUS;
+    const outline = getComputedStyle(document.documentElement).getPropertyValue('--center-outline').trim() || '#14201a';
+    const [r, g, b] = hexToRgb(outline);
+    ctx.save();
+    const imgData = ctx.getImageData(0, 0, 21, 21);
+    setPixel(imgData, cx, cy, r, g, b);
+    ctx.putImageData(imgData, 0, 0);
+    ctx.restore();
+  }
+
+  function setPixel(imgData, x, y, r, g, b){
+    if(x < 0 || y < 0 || x >= 21 || y >= 21) return;
+    const i = (y * 21 + x) * 4;
+    imgData.data[i] = r;
+    imgData.data[i+1] = g;
+    imgData.data[i+2] = b;
+    imgData.data[i+3] = 255;
+  }
+
+  function hexToRgb(hex){
+    const h = hex.replace('#', '');
+    return [
+      parseInt(h.substring(0,2), 16),
+      parseInt(h.substring(2,4), 16),
+      parseInt(h.substring(4,6), 16)
+    ];
+  }
+
+  init();
+})();
+</script>
+
+</body>
+</html>
