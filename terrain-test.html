@@ -163,14 +163,14 @@
 
 <header>
   <h1>Terrain Grid</h1>
-  <p>Live 21&times;21 biome view centered on you</p>
+  <p>Live 51&times;51 biome view centered on you</p>
 </header>
 
 <main>
   <div id="status" class="status">Loading terrain database…</div>
 
   <div class="card">
-    <canvas id="gridCanvas" width="21" height="21"></canvas>
+    <canvas id="gridCanvas" width="51" height="51"></canvas>
     <div class="label-row">
       <div id="swatch" class="swatch" style="background:var(--nodata);"></div>
       <div id="biomeName" class="biome-name">—</div>
@@ -197,7 +197,8 @@
   const refreshBtn = document.getElementById('refreshBtn');
 
   const DB_URL = 'budapest_terrain.sqlite';
-  const GRID_RADIUS = 10; // -> 21x21
+  const GRID_RADIUS = 25; // -> 51x51
+  const GRID_SIZE = GRID_RADIUS * 2 + 1;
   const REFRESH_MS = 30000;
 
   // Colors matched by eye to the provided legend image.
@@ -263,7 +264,7 @@
 
   function drawEmptyGrid(){
     ctx.fillStyle = NODATA_COLOR;
-    ctx.fillRect(0, 0, 21, 21);
+    ctx.fillRect(0, 0, GRID_SIZE, GRID_SIZE);
   }
 
   refreshBtn.addEventListener('click', locate);
@@ -331,7 +332,7 @@
       stmt.free();
     }
 
-    const imgData = ctx.createImageData(21, 21);
+    const imgData = ctx.createImageData(GRID_SIZE, GRID_SIZE);
     for(let dr = -GRID_RADIUS; dr <= GRID_RADIUS; dr++){
       for(let dc = -GRID_RADIUS; dc <= GRID_RADIUS; dc++){
         const r = row0 + dr, c = col0 + dc;
@@ -347,7 +348,7 @@
         // to the smallest pixel row for a conventional north-up display.
         const pixelRow = GRID_RADIUS - dr;
         const pixelCol = dc + GRID_RADIUS;
-        const px = pixelRow * 21 + pixelCol;
+        const px = pixelRow * GRID_SIZE + pixelCol;
         const [rr, gg, bb] = hexToRgb(color);
         imgData.data[px*4] = rr;
         imgData.data[px*4+1] = gg;
@@ -375,15 +376,15 @@
     const outline = getComputedStyle(document.documentElement).getPropertyValue('--center-outline').trim() || '#14201a';
     const [r, g, b] = hexToRgb(outline);
     ctx.save();
-    const imgData = ctx.getImageData(0, 0, 21, 21);
+    const imgData = ctx.getImageData(0, 0, GRID_SIZE, GRID_SIZE);
     setPixel(imgData, cx, cy, r, g, b);
     ctx.putImageData(imgData, 0, 0);
     ctx.restore();
   }
 
   function setPixel(imgData, x, y, r, g, b){
-    if(x < 0 || y < 0 || x >= 21 || y >= 21) return;
-    const i = (y * 21 + x) * 4;
+    if(x < 0 || y < 0 || x >= GRID_SIZE || y >= GRID_SIZE) return;
+    const i = (y * GRID_SIZE + x) * 4;
     imgData.data[i] = r;
     imgData.data[i+1] = g;
     imgData.data[i+2] = b;
