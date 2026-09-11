@@ -106,7 +106,7 @@
     color:var(--muted);
     font-size:0.78rem;
   }
-  button{
+  .primary-btn{
     font-family:inherit;
     font-size:0.95rem;
     font-weight:600;
@@ -119,12 +119,45 @@
     width:100%;
     margin-top:16px;
   }
-  button:active{
+  .primary-btn:active{
     opacity:0.85;
   }
-  button:disabled{
+  .primary-btn:disabled{
     opacity:0.6;
     cursor:default;
+  }
+  .zoom-row{
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    gap:14px;
+    margin-bottom:14px;
+  }
+  .zoom-btn{
+    font-family:inherit;
+    font-size:1.2rem;
+    font-weight:700;
+    line-height:1;
+    border:1px solid var(--border);
+    border-radius:10px;
+    width:40px;
+    height:40px;
+    cursor:pointer;
+    background:var(--card);
+    color:var(--text);
+  }
+  .zoom-btn:active:not(:disabled){
+    background:var(--border);
+  }
+  .zoom-btn:disabled{
+    opacity:0.35;
+    cursor:default;
+  }
+  .zoom-label{
+    font-size:0.85rem;
+    font-weight:600;
+    color:var(--muted);
+    min-width:64px;
   }
   .status{
     text-align:center;
@@ -163,20 +196,25 @@
 
 <header>
   <h1>Terrain Grid</h1>
-  <p>Live 51&times;51 biome view centered on you</p>
+  <p id="subtitle">Live biome view centered on you</p>
 </header>
 
 <main>
   <div id="status" class="status">Loading terrain database…</div>
 
   <div class="card">
+    <div class="zoom-row">
+      <button id="zoomInBtn" class="zoom-btn" aria-label="Zoom in">+</button>
+      <div id="zoomLabel" class="zoom-label">51&times;51</div>
+      <button id="zoomOutBtn" class="zoom-btn" aria-label="Zoom out">&minus;</button>
+    </div>
     <canvas id="gridCanvas" width="51" height="51"></canvas>
     <div class="label-row">
       <div id="swatch" class="swatch" style="background:var(--nodata);"></div>
       <div id="biomeName" class="biome-name">—</div>
     </div>
     <div id="metaRow" class="meta-row">&nbsp;</div>
-    <button id="refreshBtn">Refresh Now</button>
+    <button id="refreshBtn" class="primary-btn">Refresh Now</button>
   </div>
 
   <footer>
@@ -195,11 +233,19 @@
   const biomeNameEl = document.getElementById('biomeName');
   const metaRowEl = document.getElementById('metaRow');
   const refreshBtn = document.getElementById('refreshBtn');
+  const subtitleEl = document.getElementById('subtitle');
+  const zoomLabelEl = document.getElementById('zoomLabel');
+  const zoomInBtn = document.getElementById('zoomInBtn');
+  const zoomOutBtn = document.getElementById('zoomOutBtn');
 
   const DB_URL = 'budapest_terrain.sqlite';
-  const GRID_RADIUS = 25; // -> 51x51
-  const GRID_SIZE = GRID_RADIUS * 2 + 1;
+  const ZOOM_LEVELS = [21, 51, 101]; // smallest (most zoomed in) to largest
+  let zoomIndex = 1; // default: 51x51
+  let GRID_SIZE = ZOOM_LEVELS[zoomIndex];
+  let GRID_RADIUS = (GRID_SIZE - 1) / 2;
   const REFRESH_MS = 30000;
+
+  let lastLat = null, lastLon = null;
 
   // Colors matched by eye to the provided legend image.
   const COLORS = {
@@ -253,6 +299,7 @@
       });
 
       setStatus('');
+      updateZoomUI();
       drawEmptyGrid();
       locate();
       refreshTimer = setInterval(locate, REFRESH_MS);
@@ -267,6 +314,31 @@
     ctx.fillRect(0, 0, GRID_SIZE, GRID_SIZE);
   }
 
+  function updateZoomUI(){
+    zoomLabelEl.textContent = GRID_SIZE + '×' + GRID_SIZE;
+    subtitleEl.textContent = 'Live ' + GRID_SIZE + '×' + GRID_SIZE + ' biome view centered on you';
+    zoomInBtn.disabled = (zoomIndex === 0);
+    zoomOutBtn.disabled = (zoomIndex === ZOOM_LEVELS.length - 1);
+  }
+
+  function setZoom(newIndex){
+    newIndex = Math.max(0, Math.min(ZOOM_LEVELS.length - 1, newIndex));
+    if(newIndex === zoomIndex) return;
+    zoomIndex = newIndex;
+    GRID_SIZE = ZOOM_LEVELS[zoomIndex];
+    GRID_RADIUS = (GRID_SIZE - 1) / 2;
+    canvas.width = GRID_SIZE;
+    canvas.height = GRID_SIZE;
+    updateZoomUI();
+    if(lastLat !== null){
+      updateGrid(lastLat, lastLon);
+    } else {
+      drawEmptyGrid();
+    }
+  }
+
+  zoomInBtn.addEventListener('click', () => setZoom(zoomIndex - 1));
+  zoomOutBtn.addEventListener('click', () => setZoom(zoomIndex + 1));
   refreshBtn.addEventListener('click', locate);
 
   function locate(){
@@ -299,6 +371,8 @@
     refreshBtn.disabled = false;
     const lat = pos.coords.latitude;
     const lon = pos.coords.longitude;
+    lastLat = lat;
+    lastLon = lon;
     metaRowEl.textContent = new Date(pos.timestamp).toLocaleTimeString() + ' · ±' + Math.round(pos.coords.accuracy) + ' m';
     setStatus('');
     updateGrid(lat, lon);
