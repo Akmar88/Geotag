@@ -16,7 +16,7 @@
     --err-bg:#fdecec;
     --err-text:#9b2c2c;
     --shadow:0 2px 10px rgba(20,32,26,0.06);
-    --nodata:#e7e9e7;
+    --nodata:#ffffff;
     --center-outline:#14201a;
   }
   @media (prefers-color-scheme: dark){
@@ -30,7 +30,7 @@
       --err-bg:#3a1c1c;
       --err-text:#ff9b9b;
       --shadow:0 2px 12px rgba(0,0,0,0.35);
-      --nodata:#232b26;
+      --nodata:#ffffff;
       --center-outline:#f4f6f4;
     }
   }
@@ -183,6 +183,30 @@
     margin-right:8px;
   }
   @keyframes spin{to{transform:rotate(360deg);}}
+  .db-row{
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    gap:10px;
+    margin-top:4px;
+  }
+  .db-label{
+    font-size:0.78rem;
+    color:var(--muted);
+  }
+  .db-select{
+    font-family:inherit;
+    font-size:0.82rem;
+    font-weight:600;
+    color:var(--text);
+    background:var(--card);
+    border:1px solid var(--border);
+    border-radius:8px;
+    padding:6px 10px;
+  }
+  .db-select:disabled{
+    opacity:0.6;
+  }
   footer{
     text-align:center;
     color:var(--muted);
@@ -217,8 +241,16 @@
     <button id="refreshBtn" class="primary-btn">Refresh Now</button>
   </div>
 
+  <div class="db-row">
+    <label for="dbSelect" class="db-label">Database</label>
+    <select id="dbSelect" class="db-select">
+      <option value="budapest_terrain.sqlite">budapest_terrain.sqlite</option>
+      <option value="terrain_3regions.sqlite">terrain_3regions.sqlite</option>
+    </select>
+  </div>
+
   <footer>
-    Updates automatically every 30 seconds. Terrain data: Budapest OSM extract, 25m grid.<br>
+    Updates automatically every 30 seconds. Terrain data: OSM extract, 25m grid.<br>
     Map data © OpenStreetMap contributors.
   </footer>
 </main>
@@ -237,8 +269,9 @@
   const zoomLabelEl = document.getElementById('zoomLabel');
   const zoomInBtn = document.getElementById('zoomInBtn');
   const zoomOutBtn = document.getElementById('zoomOutBtn');
+  const dbSelect = document.getElementById('dbSelect');
 
-  const DB_URL = 'budapest_terrain.sqlite';
+  const DEFAULT_DB = 'budapest_terrain.sqlite';
   const ZOOM_LEVELS = [21, 51, 101]; // smallest (most zoomed in) to largest
   let zoomIndex = 1; // default: 51x51
   let GRID_SIZE = ZOOM_LEVELS[zoomIndex];
@@ -247,43 +280,47 @@
 
   let lastLat = null, lastLon = null;
 
-  // Colors matched by eye to the provided legend image.
+  // Colors matched by eye to the provided legend image; Green Residential
+  // and Stream (added in the v2/3-regions database) are eyeballed to sit
+  // visually between their nearest relatives.
   const COLORS = {
-    'Grassy':      '#d6e8a8',
-    'Residential': '#cbaa78',
-    'Forest':      '#1e5631',
-    'Park':        '#7cc36e',
-    'Cemetery':    '#a9a9a9',
-    'River':       '#4a90d9',
-    'Lake':        '#1a3c6e'
+    'Grassy':            '#d6e8a8',
+    'Residential':       '#cbaa78',
+    'Forest':            '#1e5631',
+    'Park':              '#7cc36e',
+    'Cemetery':          '#a9a9a9',
+    'River':             '#4a90d9',
+    'Lake':              '#1a3c6e',
+    'Green Residential': '#a3b18a',
+    'Stream':            '#8fc4ea'
   };
-  const NODATA_COLOR = '#c9cdc9';
+  const NODATA_COLOR = '#ffffff';
 
+  let SQL = null;
   let db = null;
   let meta = null;       // {origin_lon, origin_lat, mlon, mlat, cellSize, width, height}
   let categories = null; // {id: name}
   let refreshTimer = null;
+  const dbCache = new Map(); // filename -> {db, meta, categories}
 
   function setStatus(html, isError){
     statusEl.innerHTML = html || '';
     statusEl.className = 'status' + (isError ? ' error' : '');
   }
 
-  async function init(){
-    try{
-      const SQL = await initSqlJs({
-        locateFile: file => 'https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.3/' + file
-      });
-      const buf = await fetch(DB_URL).then(r => {
+  async function loadDatabase(filename){
+    let entry = dbCache.get(filename);
+    if(!entry){
+      const buf = await fetch(filename).then(r => {
         if(!r.ok) throw new Error('DB fetch HTTP ' + r.status);
         return r.arrayBuffer();
       });
-      db = new SQL.Database(new Uint8Array(buf));
+      const database = new SQL.Database(new Uint8Array(buf));
 
-      const metaRows = db.exec('SELECT key, value FROM meta')[0].values;
+      const metaRows = database.exec('SELECT key, value FROM meta')[0].values;
       const m = {};
       metaRows.forEach(([k, v]) => { m[k] = v; });
-      meta = {
+      const parsedMeta = {
         originLon: parseFloat(m.origin_lon),
         originLat: parseFloat(m.origin_lat),
         mLon: parseFloat(m.meters_per_degree_lon),
@@ -293,10 +330,25 @@
         height: parseInt(m.grid_height_rows, 10)
       };
 
-      categories = {};
-      db.exec('SELECT id, name FROM categories')[0].values.forEach(([id, name]) => {
-        categories[id] = name;
+      const parsedCategories = {};
+      database.exec('SELECT id, name FROM categories')[0].values.forEach(([id, name]) => {
+        parsedCategories[id] = name;
       });
+
+      entry = { db: database, meta: parsedMeta, categories: parsedCategories };
+      dbCache.set(filename, entry);
+    }
+    db = entry.db;
+    meta = entry.meta;
+    categories = entry.categories;
+  }
+
+  async function init(){
+    try{
+      SQL = await initSqlJs({
+        locateFile: file => 'https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.3/' + file
+      });
+      await loadDatabase(DEFAULT_DB);
 
       setStatus('');
       updateZoomUI();
@@ -308,6 +360,25 @@
       setStatus('Could not load the terrain database. Check your connection and reload.', true);
     }
   }
+
+  dbSelect.addEventListener('change', async () => {
+    dbSelect.disabled = true;
+    setStatus('<span class="spinner"></span> Loading database…');
+    try{
+      await loadDatabase(dbSelect.value);
+      setStatus('');
+      if(lastLat !== null){
+        updateGrid(lastLat, lastLon);
+      } else {
+        drawEmptyGrid();
+      }
+    } catch(e){
+      console.error(e);
+      setStatus('Could not load that database. Check your connection and try again.', true);
+    } finally {
+      dbSelect.disabled = false;
+    }
+  });
 
   function drawEmptyGrid(){
     ctx.fillStyle = NODATA_COLOR;
