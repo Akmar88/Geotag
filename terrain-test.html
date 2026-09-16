@@ -306,6 +306,18 @@
     statusEl.className = 'status' + (isError ? ' error' : '');
   }
 
+  const DB_COOKIE = 'terrainDb';
+
+  function setCookie(name, value, days){
+    const expires = new Date(Date.now() + days * 86400000).toUTCString();
+    document.cookie = name + '=' + encodeURIComponent(value) + ';expires=' + expires + ';path=/;samesite=lax';
+  }
+
+  function getCookie(name){
+    const match = document.cookie.match(new RegExp('(?:^|; )' + name + '=([^;]*)'));
+    return match ? decodeURIComponent(match[1]) : null;
+  }
+
   async function loadDatabase(filename){
     let entry = dbCache.get(filename);
     if(!entry){
@@ -346,7 +358,12 @@
       SQL = await initSqlJs({
         locateFile: file => 'https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.3/' + file
       });
-      await loadDatabase(DEFAULT_DB);
+
+      const availableDbs = Array.from(dbSelect.options).map(o => o.value);
+      const savedDb = getCookie(DB_COOKIE);
+      const initialDb = (savedDb && availableDbs.includes(savedDb)) ? savedDb : DEFAULT_DB;
+      dbSelect.value = initialDb;
+      await loadDatabase(initialDb);
 
       setStatus('');
       updateZoomUI();
@@ -364,6 +381,7 @@
     setStatus('<span class="spinner"></span> Loading database…');
     try{
       await loadDatabase(dbSelect.value);
+      setCookie(DB_COOKIE, dbSelect.value, 365);
       setStatus('');
       if(lastLat !== null){
         updateGrid(lastLat, lastLon);
