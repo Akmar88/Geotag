@@ -17,7 +17,7 @@
     --err-text:#9b2c2c;
     --shadow:0 2px 10px rgba(20,32,26,0.06);
     --nodata:#ffffff;
-    --center-outline:#14201a;
+    --center-outline:#c80000;
   }
   @media (prefers-color-scheme: dark){
     :root{
@@ -31,7 +31,6 @@
       --err-text:#ff9b9b;
       --shadow:0 2px 12px rgba(0,0,0,0.35);
       --nodata:#ffffff;
-      --center-outline:#f4f6f4;
     }
   }
   *{box-sizing:border-box;}
@@ -517,7 +516,7 @@
 
   function drawCenterOutline(){
     const cx = GRID_RADIUS, cy = GRID_RADIUS;
-    const outline = getComputedStyle(document.documentElement).getPropertyValue('--center-outline').trim() || '#14201a';
+    const outline = getComputedStyle(document.documentElement).getPropertyValue('--center-outline').trim() || '#c80000';
     const [r, g, b] = hexToRgb(outline);
     ctx.save();
     const imgData = ctx.getImageData(0, 0, GRID_SIZE, GRID_SIZE);
