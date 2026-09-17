@@ -81,6 +81,9 @@
     border:1px solid var(--border);
     display:block;
     margin:0 auto;
+    touch-action:none;
+    -webkit-touch-callout:none;
+    user-select:none;
   }
   .label-row{
     display:flex;
@@ -245,7 +248,7 @@
     <select id="dbSelect" class="db-select">
       <option value="budapest_terrain.sqlite">budapest_terrain.sqlite</option>
       <option value="terrain_3regions.sqlite">terrain_3regions.sqlite</option>
-      <option value="terrain_gaps.sqlite">terrain_gaps.sqlite</option>
+      <option value="GAPDATA.sqlite">GAPDATA.sqlite</option>
     </select>
   </div>
 
@@ -272,6 +275,7 @@
   const dbSelect = document.getElementById('dbSelect');
 
   const DEFAULT_DB = 'budapest_terrain.sqlite';
+  const GAPDATA_FILE = 'GAPDATA.sqlite'; // preloaded and used for press-and-hold peeking
   const ZOOM_LEVELS = [21, 51, 101]; // smallest (most zoomed in) to largest
   let zoomIndex = 1; // default: 51x51
   let GRID_SIZE = ZOOM_LEVELS[zoomIndex];
@@ -318,7 +322,10 @@
     return match ? decodeURIComponent(match[1]) : null;
   }
 
-  async function loadDatabase(filename){
+  // Fetches+parses a database into dbCache if not already cached, without
+  // touching which one is currently "active" -- lets us preload GAPDATA in
+  // the background while a different database stays on screen.
+  async function ensureLoaded(filename){
     let entry = dbCache.get(filename);
     if(!entry){
       const buf = await fetch(filename).then(r => {
@@ -348,9 +355,25 @@
       entry = { db: database, meta: parsedMeta, categories: parsedCategories };
       dbCache.set(filename, entry);
     }
+    return entry;
+  }
+
+  function setActive(entry){
     db = entry.db;
     meta = entry.meta;
     categories = entry.categories;
+  }
+
+  async function loadDatabase(filename){
+    setActive(await ensureLoaded(filename));
+  }
+
+  function redrawFromLastFix(){
+    if(lastLat !== null){
+      updateGrid(lastLat, lastLon);
+    } else {
+      drawEmptyGrid();
+    }
   }
 
   async function init(){
@@ -364,6 +387,7 @@
       const initialDb = (savedDb && availableDbs.includes(savedDb)) ? savedDb : DEFAULT_DB;
       dbSelect.value = initialDb;
       await loadDatabase(initialDb);
+      ensureLoaded(GAPDATA_FILE).catch(e => console.error('Gap data preload failed', e));
 
       setStatus('');
       updateZoomUI();
@@ -383,11 +407,7 @@
       await loadDatabase(dbSelect.value);
       setCookie(DB_COOKIE, dbSelect.value, 365);
       setStatus('');
-      if(lastLat !== null){
-        updateGrid(lastLat, lastLon);
-      } else {
-        drawEmptyGrid();
-      }
+      redrawFromLastFix();
     } catch(e){
       console.error(e);
       setStatus('Could not load that database. Check your connection and try again.', true);
@@ -395,6 +415,44 @@
       dbSelect.disabled = false;
     }
   });
+
+  // Press-and-hold on the grid temporarily peeks at the gap-fill overlay,
+  // reverting to whatever database is selected as soon as it's released.
+  // Disabled while GAPDATA is itself the selected database, since there's
+  // nothing to "peek" back from in that case.
+  let holding = false;
+
+  canvas.addEventListener('pointerdown', async (e) => {
+    if(dbSelect.value === GAPDATA_FILE) return;
+    e.preventDefault();
+    holding = true;
+    dbSelect.disabled = true;
+    try{
+      const gapEntry = await ensureLoaded(GAPDATA_FILE);
+      if(!holding) return; // released before the (rare) cold-load finished
+      setActive(gapEntry);
+      redrawFromLastFix();
+    } catch(e){
+      console.error('Could not load gap data', e);
+      holding = false;
+      dbSelect.disabled = false;
+    }
+  });
+
+  function releaseHold(){
+    if(!holding) return;
+    holding = false;
+    dbSelect.disabled = false;
+    const entry = dbCache.get(dbSelect.value);
+    if(entry){
+      setActive(entry);
+      redrawFromLastFix();
+    }
+  }
+
+  canvas.addEventListener('pointerup', releaseHold);
+  canvas.addEventListener('pointercancel', releaseHold);
+  canvas.addEventListener('pointerleave', releaseHold);
 
   function drawEmptyGrid(){
     ctx.fillStyle = NODATA_COLOR;
@@ -417,11 +475,7 @@
     canvas.width = GRID_SIZE;
     canvas.height = GRID_SIZE;
     updateZoomUI();
-    if(lastLat !== null){
-      updateGrid(lastLat, lastLon);
-    } else {
-      drawEmptyGrid();
-    }
+    redrawFromLastFix();
   }
 
   zoomInBtn.addEventListener('click', () => setZoom(zoomIndex - 1));
