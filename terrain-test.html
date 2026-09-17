@@ -128,6 +128,29 @@
     opacity:0.6;
     cursor:default;
   }
+  .action-row{
+    display:flex;
+    gap:10px;
+    margin-top:16px;
+  }
+  .action-row .primary-btn{
+    width:auto;
+    flex:1;
+    margin-top:0;
+  }
+  .log-link{
+    display:block;
+    text-align:center;
+    margin-top:10px;
+    font-size:0.78rem;
+    font-weight:600;
+    color:var(--muted);
+    text-decoration:none;
+    padding:4px;
+  }
+  .log-link:active{
+    opacity:0.7;
+  }
   .zoom-row{
     display:flex;
     align-items:center;
@@ -240,7 +263,11 @@
       <div id="biomeName" class="biome-name">—</div>
     </div>
     <div id="metaRow" class="meta-row">&nbsp;</div>
-    <button id="refreshBtn" class="primary-btn">Refresh Now</button>
+    <div class="action-row">
+      <button id="logBtn" class="primary-btn">Log Position</button>
+      <button id="refreshBtn" class="primary-btn">Refresh Now</button>
+    </div>
+    <a href="log.html" class="log-link">View Log</a>
   </div>
 
   <div class="db-row">
@@ -273,6 +300,7 @@
   const zoomInBtn = document.getElementById('zoomInBtn');
   const zoomOutBtn = document.getElementById('zoomOutBtn');
   const dbSelect = document.getElementById('dbSelect');
+  const logBtn = document.getElementById('logBtn');
 
   const DEFAULT_DB = 'budapest_terrain.sqlite';
   const GAPDATA_FILE = 'GAPDATA.sqlite'; // preloaded and used for press-and-hold peeking
@@ -311,6 +339,37 @@
   }
 
   const DB_COOKIE = 'terrainDb';
+  const LOG_KEY = 'terrainPositionLog';
+
+  function readLog(){
+    try{ return JSON.parse(localStorage.getItem(LOG_KEY) || '[]'); }
+    catch(e){ return []; }
+  }
+
+  function writeLog(log){
+    localStorage.setItem(LOG_KEY, JSON.stringify(log));
+  }
+
+  // Looks up the biome for one exact point against a specific (already-
+  // loaded) database entry -- independent of whatever is currently drawn
+  // on screen, so logging always reflects the selected database even
+  // mid-hold on the gap overlay.
+  function lookupBiome(entry, lat, lon){
+    const col = Math.floor((lon - entry.meta.originLon) * entry.meta.mLon / entry.meta.cellSize);
+    const row = Math.floor((lat - entry.meta.originLat) * entry.meta.mLat / entry.meta.cellSize);
+    if(row < 0 || row >= entry.meta.height || col < 0 || col >= entry.meta.width){
+      return 'Outside mapped area';
+    }
+    const cellId = row * entry.meta.width + col;
+    const stmt = entry.db.prepare('SELECT category FROM cells WHERE cell_id = ?');
+    stmt.bind([cellId]);
+    let biome = 'Outside mapped area';
+    if(stmt.step()){
+      biome = entry.categories[stmt.get()[0]] || 'Unknown';
+    }
+    stmt.free();
+    return biome;
+  }
 
   function setCookie(name, value, days){
     const expires = new Date(Date.now() + days * 86400000).toUTCString();
@@ -453,6 +512,33 @@
   canvas.addEventListener('pointerup', releaseHold);
   canvas.addEventListener('pointercancel', releaseHold);
   canvas.addEventListener('pointerleave', releaseHold);
+
+  logBtn.addEventListener('click', () => {
+    if(lastLat === null){
+      setStatus('No location yet -- tap Refresh Now first.', true);
+      return;
+    }
+    const description = prompt('Description for this log entry (optional):', '');
+    if(description === null) return; // cancelled
+
+    const filename = dbSelect.value;
+    const entry = dbCache.get(filename);
+    const biome = entry ? lookupBiome(entry, lastLat, lastLon) : 'Unknown';
+
+    const log = readLog();
+    log.push({
+      time: new Date().toISOString(),
+      lat: lastLat,
+      lon: lastLon,
+      database: filename,
+      biome: biome,
+      description: description
+    });
+    writeLog(log);
+
+    setStatus('Position logged.');
+    setTimeout(() => { if(statusEl.textContent === 'Position logged.') setStatus(''); }, 2000);
+  });
 
   function drawEmptyGrid(){
     ctx.fillStyle = NODATA_COLOR;
