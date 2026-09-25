@@ -272,11 +272,8 @@
 
   <div class="db-row">
     <label for="dbSelect" class="db-label">Database</label>
-    <select id="dbSelect" class="db-select">
-      <option value="budapest_terrain.sqlite">budapest_terrain.sqlite</option>
-      <option value="terrain_3regions.sqlite">terrain_3regions.sqlite</option>
-      <option value="GAPDATA.sqlite">GAPDATA.sqlite</option>
-    </select>
+    <!-- Filled from databases.json, which a GitHub Action rebuilds from the *.sqlite files. -->
+    <select id="dbSelect" class="db-select" disabled></select>
   </div>
 
   <footer>
@@ -302,8 +299,14 @@
   const dbSelect = document.getElementById('dbSelect');
   const logBtn = document.getElementById('logBtn');
 
-  const DEFAULT_DB = 'budapest_terrain.sqlite';
-  const GAPDATA_FILE = 'GAPDATA.sqlite'; // preloaded and used for press-and-hold peeking
+  // databases.json lists each map as {file, label, gaps?}; the first entry is
+  // the default. A map's gaps file (X_gaps.sqlite) is preloaded and shown
+  // while the grid is held down.
+  const MANIFEST_FILE = 'databases.json';
+  const REQUIRED_TABLES = ['meta', 'categories', 'cells'];
+  const REQUIRED_META = ['origin_lon', 'origin_lat', 'meters_per_degree_lon', 'meters_per_degree_lat',
+                         'cell_size_m', 'grid_width_cols', 'grid_height_rows'];
+  let manifest = [];
   const ZOOM_LEVELS = [21, 51, 101]; // smallest (most zoomed in) to largest
   let zoomIndex = 1; // default: 51x51
   let GRID_SIZE = ZOOM_LEVELS[zoomIndex];
@@ -382,20 +385,38 @@
   }
 
   // Fetches+parses a database into dbCache if not already cached, without
-  // touching which one is currently "active" -- lets us preload GAPDATA in
+  // touching which one is currently "active" -- lets us preload a gaps file in
   // the background while a different database stays on screen.
   async function ensureLoaded(filename){
     let entry = dbCache.get(filename);
     if(!entry){
-      const buf = await fetch(filename).then(r => {
-        if(!r.ok) throw new Error('DB fetch HTTP ' + r.status);
-        return r.arrayBuffer();
-      });
-      const database = new SQL.Database(new Uint8Array(buf));
+      let r;
+      try{
+        r = await fetch(encodeURIComponent(filename));
+      } catch(e){
+        throw new Error(filename + ': network error, check your connection');
+      }
+      if(!r.ok) throw new Error(filename + ': HTTP ' + r.status);
+      const buf = await r.arrayBuffer();
 
-      const metaRows = database.exec('SELECT key, value FROM meta')[0].values;
+      let database;
+      try{
+        database = new SQL.Database(new Uint8Array(buf));
+        const tables = database.exec("SELECT name FROM sqlite_master WHERE type='table'");
+        const tableNames = tables.length ? tables[0].values.map(v => v[0]) : [];
+        const missing = REQUIRED_TABLES.filter(t => !tableNames.includes(t));
+        if(missing.length) throw new Error('missing table(s) ' + missing.join(', '));
+      } catch(e){
+        throw new Error(filename + ': not a valid terrain database (' + e.message + ')');
+      }
+
+      const metaRows = database.exec('SELECT key, value FROM meta');
       const m = {};
-      metaRows.forEach(([k, v]) => { m[k] = v; });
+      (metaRows.length ? metaRows[0].values : []).forEach(([k, v]) => { m[k] = v; });
+      const badKeys = REQUIRED_META.filter(k => !isFinite(parseFloat(m[k])));
+      if(badKeys.length){
+        throw new Error(filename + ': meta key(s) missing or not a number: ' + badKeys.join(', '));
+      }
       const parsedMeta = {
         originLon: parseFloat(m.origin_lon),
         originLat: parseFloat(m.origin_lat),
@@ -407,11 +428,14 @@
       };
 
       const parsedCategories = {};
-      database.exec('SELECT id, name FROM categories')[0].values.forEach(([id, name]) => {
+      const catRows = database.exec('SELECT id, name FROM categories');
+      (catRows.length ? catRows[0].values : []).forEach(([id, name]) => {
         parsedCategories[id] = name;
       });
+      // Categories without a colour would otherwise silently render as no-data white.
+      const uncolored = Object.values(parsedCategories).filter(name => !(name in COLORS));
 
-      entry = { db: database, meta: parsedMeta, categories: parsedCategories };
+      entry = { db: database, meta: parsedMeta, categories: parsedCategories, uncolored: uncolored };
       dbCache.set(filename, entry);
     }
     return entry;
@@ -424,7 +448,48 @@
   }
 
   async function loadDatabase(filename){
-    setActive(await ensureLoaded(filename));
+    const entry = await ensureLoaded(filename);
+    setActive(entry);
+    const gaps = gapsFileFor(filename);
+    if(gaps) ensureLoaded(gaps).catch(e => console.error('Gap data preload failed', e));
+    return entry;
+  }
+
+  function gapsFileFor(filename){
+    const item = manifest.find(d => d.file === filename);
+    return item && item.gaps ? item.gaps : null;
+  }
+
+  // Clears the status line, or notes any categories the page has no colour for.
+  function showLoadedStatus(entry){
+    if(entry.uncolored.length){
+      setStatus('Note: no colour defined for ' + escapeHtml(entry.uncolored.join(', ')) + ' (shown as white).');
+    } else {
+      setStatus('');
+    }
+  }
+
+  function escapeHtml(s){
+    return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  }
+
+  async function loadManifest(){
+    let r;
+    try{
+      r = await fetch(MANIFEST_FILE, { cache: 'no-cache' });
+    } catch(e){
+      throw new Error(MANIFEST_FILE + ': network error, check your connection');
+    }
+    if(!r.ok) throw new Error(MANIFEST_FILE + ': HTTP ' + r.status);
+    let list;
+    try{
+      list = await r.json();
+    } catch(e){
+      throw new Error(MANIFEST_FILE + ': not valid JSON');
+    }
+    list = Array.isArray(list) ? list.filter(d => d && typeof d.file === 'string') : [];
+    if(!list.length) throw new Error(MANIFEST_FILE + ': no databases listed');
+    return list;
   }
 
   function redrawFromLastFix(){
@@ -441,21 +506,27 @@
         locateFile: file => 'https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.3/' + file
       });
 
-      const availableDbs = Array.from(dbSelect.options).map(o => o.value);
-      const savedDb = getCookie(DB_COOKIE);
-      const initialDb = (savedDb && availableDbs.includes(savedDb)) ? savedDb : DEFAULT_DB;
-      dbSelect.value = initialDb;
-      await loadDatabase(initialDb);
-      ensureLoaded(GAPDATA_FILE).catch(e => console.error('Gap data preload failed', e));
+      manifest = await loadManifest();
+      manifest.forEach(d => {
+        const opt = document.createElement('option');
+        opt.value = d.file;
+        opt.textContent = d.label || d.file;
+        dbSelect.appendChild(opt);
+      });
 
-      setStatus('');
+      const savedDb = getCookie(DB_COOKIE);
+      const initialDb = manifest.some(d => d.file === savedDb) ? savedDb : manifest[0].file;
+      dbSelect.value = initialDb;
+      dbSelect.disabled = false;
+      showLoadedStatus(await loadDatabase(initialDb));
+
       updateZoomUI();
       drawEmptyGrid();
       locate();
       refreshTimer = setInterval(locate, REFRESH_MS);
     } catch(e){
       console.error(e);
-      setStatus('Could not load the terrain database. Check your connection and reload.', true);
+      setStatus('Could not load the terrain database: ' + escapeHtml(e.message) + '. Reload to try again.', true);
     }
   }
 
@@ -463,36 +534,37 @@
     dbSelect.disabled = true;
     setStatus('<span class="spinner"></span> Loading database…');
     try{
-      await loadDatabase(dbSelect.value);
+      const entry = await loadDatabase(dbSelect.value);
       setCookie(DB_COOKIE, dbSelect.value, 365);
-      setStatus('');
+      showLoadedStatus(entry);
       redrawFromLastFix();
     } catch(e){
       console.error(e);
-      setStatus('Could not load that database. Check your connection and try again.', true);
+      setStatus('Could not load that database: ' + escapeHtml(e.message) + '.', true);
     } finally {
       dbSelect.disabled = false;
     }
   });
 
-  // Press-and-hold on the grid temporarily peeks at the gap-fill overlay,
-  // reverting to whatever database is selected as soon as it's released.
-  // Disabled while GAPDATA is itself the selected database, since there's
-  // nothing to "peek" back from in that case.
+  // Press-and-hold on the grid temporarily peeks at the selected map's gap-fill
+  // overlay (its X_gaps.sqlite), reverting as soon as it's released. Does
+  // nothing for maps that have no gaps file.
   let holding = false;
 
   canvas.addEventListener('pointerdown', async (e) => {
-    if(dbSelect.value === GAPDATA_FILE) return;
+    const gapsFile = gapsFileFor(dbSelect.value);
+    if(!gapsFile) return;
     e.preventDefault();
     holding = true;
     dbSelect.disabled = true;
     try{
-      const gapEntry = await ensureLoaded(GAPDATA_FILE);
+      const gapEntry = await ensureLoaded(gapsFile);
       if(!holding) return; // released before the (rare) cold-load finished
       setActive(gapEntry);
       redrawFromLastFix();
     } catch(e){
       console.error('Could not load gap data', e);
+      setStatus('Could not load gap data: ' + escapeHtml(e.message) + '.', true);
       holding = false;
       dbSelect.disabled = false;
     }

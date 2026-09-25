@@ -1,0 +1,16 @@
+[
+  {
+    "file": "budapest_terrain.sqlite",
+    "label": "Budapest + Solymár"
+  },
+  {
+    "file": "terrain_3regions.sqlite",
+    "label": "Solymár, Keleti, NewRegion1",
+    "gaps": "terrain_3regions_gaps.sqlite"
+  },
+  {
+    "file": "satoraljaujhely1.sqlite",
+    "label": "Sátoraljaújhely",
+    "gaps": "satoraljaujhely1_gaps.sqlite"
+  }
+]
