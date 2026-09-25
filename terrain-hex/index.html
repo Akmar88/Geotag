@@ -230,6 +230,29 @@
   .db-select:disabled{
     opacity:0.6;
   }
+  .view-switch{
+    display:flex;
+    max-width:220px;
+    margin:0 auto 12px;
+    padding:3px;
+    background:var(--border);
+    border-radius:12px;
+  }
+  .view-switch a{
+    flex:1;
+    text-align:center;
+    padding:7px 0;
+    border-radius:9px;
+    font-size:0.85rem;
+    font-weight:600;
+    color:var(--muted);
+    text-decoration:none;
+  }
+  .view-switch a[aria-current="page"]{
+    background:var(--card);
+    color:var(--text);
+    box-shadow:var(--shadow);
+  }
   footer{
     text-align:center;
     color:var(--muted);
@@ -247,12 +270,17 @@
 </header>
 
 <main>
+  <nav class="view-switch" aria-label="Map type">
+    <a id="switchLink" href="../terrain-test.html">Grid</a>
+    <a aria-current="page">Hex</a>
+  </nav>
+
   <div id="status" class="status">Loading terrain database…</div>
 
   <div class="card">
     <div class="zoom-row">
       <button id="zoomInBtn" class="zoom-btn" aria-label="Zoom in">+</button>
-      <div id="zoomLabel" class="zoom-label">25 rings</div>
+      <div id="zoomLabel" class="zoom-label">34 rings</div>
       <button id="zoomOutBtn" class="zoom-btn" aria-label="Zoom out">&minus;</button>
     </div>
     <canvas id="gridCanvas" width="336" height="336"></canvas>
@@ -275,7 +303,7 @@
   </div>
 
   <footer>
-    Updates automatically every 30 seconds. Terrain data: OSM extract, H3 resolution 11 hexes (~50&nbsp;m across).<br>
+    Updates automatically every 30 seconds. Terrain data: OSM extract, H3 resolution 12 hexes (~19&nbsp;m across).<br>
     Map data © OpenStreetMap contributors.
   </footer>
 </main>
@@ -297,6 +325,7 @@
   const zoomOutBtn = document.getElementById('zoomOutBtn');
   const dbSelect = document.getElementById('dbSelect');
   const logBtn = document.getElementById('logBtn');
+  const switchLink = document.getElementById('switchLink');
 
   // databases.json lists each map as {file, label, gaps?}; the first entry is
   // the default. A map's gaps file (X_gaps.sqlite) is preloaded and shown
@@ -304,11 +333,15 @@
   const MANIFEST_FILE = 'databases.json';
   const REQUIRED_TABLES = ['meta', 'categories', 'cells'];
   let manifest = [];
-  const ZOOM_LEVELS = [10, 25, 50]; // rings of hexes around you, most zoomed in first
-  let zoomIndex = 1; // default: 25 rings
+  // Rings of hexes around you, most zoomed in first. At resolution 12 these
+  // make the map ~530 / 1260 / 2530 m wide, matching the square page's
+  // 21 / 51 / 101 cells of 25 m.
+  const ZOOM_LEVELS = [14, 34, 69];
+  let zoomIndex = 1; // default: 34 rings
   let RINGS = ZOOM_LEVELS[zoomIndex];
   const QUERY_CHUNK = 500; // hex ids per SQL IN (...) query
   const METERS_PER_DEGREE = 111320;
+  const SWITCH_TARGET = '../terrain-test.html';
   const REFRESH_MS = 30000;
 
   let lastLat = null, lastLon = null;
@@ -427,6 +460,11 @@
     return entry;
   }
 
+  // The Grid/Hex switch carries the selected map over to the other page.
+  function updateSwitchLink(){
+    switchLink.href = SWITCH_TARGET + '?db=' + encodeURIComponent(dbSelect.value);
+  }
+
   function setActive(entry){
     db = entry.db;
     meta = entry.meta;
@@ -500,10 +538,17 @@
         dbSelect.appendChild(opt);
       });
 
+      // ?db= comes from the Grid/Hex switch on the other page; it wins over
+      // the remembered choice when this page has the same map.
+      const linkedDb = new URLSearchParams(location.search).get('db');
       const savedDb = getCookie(DB_COOKIE);
-      const initialDb = manifest.some(d => d.file === savedDb) ? savedDb : manifest[0].file;
+      const initialDb = manifest.some(d => d.file === linkedDb) ? linkedDb
+                      : manifest.some(d => d.file === savedDb) ? savedDb
+                      : manifest[0].file;
+      if(initialDb === linkedDb) setCookie(DB_COOKIE, linkedDb, 365);
       dbSelect.value = initialDb;
       dbSelect.disabled = false;
+      updateSwitchLink();
       showLoadedStatus(await loadDatabase(initialDb));
 
       updateZoomUI();
@@ -522,6 +567,7 @@
     try{
       const entry = await loadDatabase(dbSelect.value);
       setCookie(DB_COOKIE, dbSelect.value, 365);
+      updateSwitchLink();
       showLoadedStatus(entry);
       redrawFromLastFix();
     } catch(e){
