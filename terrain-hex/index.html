@@ -1,0 +1,754 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<meta name="theme-color" content="#0f3d2e">
+<title>Terrain Hex</title>
+<style>
+  :root{
+    --bg:#f4f6f4;
+    --card:#ffffff;
+    --text:#14201a;
+    --muted:#5b6b62;
+    --accent:#1f7a54;
+    --border:#e1e6e2;
+    --err-bg:#fdecec;
+    --err-text:#9b2c2c;
+    --shadow:0 2px 10px rgba(20,32,26,0.06);
+    --nodata:#ffffff;
+    --center-outline:#c80000;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#0f1512;
+      --card:#182019;
+      --text:#e9efe9;
+      --muted:#93a39a;
+      --accent:#3ecb8c;
+      --border:#263129;
+      --err-bg:#3a1c1c;
+      --err-text:#ff9b9b;
+      --shadow:0 2px 12px rgba(0,0,0,0.35);
+      --nodata:#ffffff;
+    }
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    background:var(--bg);
+    color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    min-height:100vh;
+    padding-bottom:40px;
+  }
+  header{
+    padding:22px 20px 14px;
+    text-align:center;
+  }
+  header h1{
+    margin:0;
+    font-size:1.4rem;
+    font-weight:700;
+    letter-spacing:0.02em;
+  }
+  header p{
+    margin:4px 0 0;
+    color:var(--muted);
+    font-size:0.82rem;
+  }
+  main{
+    max-width:420px;
+    margin:0 auto;
+    padding:0 16px;
+  }
+  .card{
+    background:var(--card);
+    border:1px solid var(--border);
+    border-radius:16px;
+    box-shadow:var(--shadow);
+    padding:20px 20px 18px;
+    margin-bottom:16px;
+    text-align:center;
+  }
+  #gridCanvas{
+    width:100%;
+    max-width:336px;
+    aspect-ratio:1/1;
+    border-radius:8px;
+    border:1px solid var(--border);
+    display:block;
+    margin:0 auto;
+    touch-action:none;
+    -webkit-touch-callout:none;
+    user-select:none;
+  }
+  .label-row{
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    gap:10px;
+    margin-top:16px;
+  }
+  .swatch{
+    width:16px;
+    height:16px;
+    border-radius:4px;
+    border:1px solid rgba(0,0,0,0.15);
+    flex-shrink:0;
+  }
+  .biome-name{
+    font-size:1.15rem;
+    font-weight:700;
+  }
+  .meta-row{
+    margin-top:6px;
+    color:var(--muted);
+    font-size:0.78rem;
+  }
+  .primary-btn{
+    font-family:inherit;
+    font-size:0.95rem;
+    font-weight:600;
+    border:none;
+    border-radius:12px;
+    padding:12px 20px;
+    cursor:pointer;
+    background:var(--accent);
+    color:#ffffff;
+    width:100%;
+    margin-top:16px;
+  }
+  .primary-btn:active{
+    opacity:0.85;
+  }
+  .primary-btn:disabled{
+    opacity:0.6;
+    cursor:default;
+  }
+  .action-row{
+    display:flex;
+    gap:10px;
+    margin-top:16px;
+  }
+  .action-row .primary-btn{
+    width:auto;
+    flex:1;
+    margin-top:0;
+  }
+  .log-link{
+    display:block;
+    text-align:center;
+    margin-top:10px;
+    font-size:0.78rem;
+    font-weight:600;
+    color:var(--muted);
+    text-decoration:none;
+    padding:4px;
+  }
+  .log-link:active{
+    opacity:0.7;
+  }
+  .zoom-row{
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    gap:14px;
+    margin-bottom:14px;
+  }
+  .zoom-btn{
+    font-family:inherit;
+    font-size:1.2rem;
+    font-weight:700;
+    line-height:1;
+    border:1px solid var(--border);
+    border-radius:10px;
+    width:40px;
+    height:40px;
+    cursor:pointer;
+    background:var(--card);
+    color:var(--text);
+  }
+  .zoom-btn:active:not(:disabled){
+    background:var(--border);
+  }
+  .zoom-btn:disabled{
+    opacity:0.35;
+    cursor:default;
+  }
+  .zoom-label{
+    font-size:0.85rem;
+    font-weight:600;
+    color:var(--muted);
+    min-width:64px;
+  }
+  .status{
+    text-align:center;
+    color:var(--muted);
+    font-size:0.85rem;
+    margin:6px 0 14px;
+    min-height:1.1em;
+  }
+  .status.error{
+    color:var(--err-text);
+    background:var(--err-bg);
+    border-radius:10px;
+    padding:10px 12px;
+  }
+  .spinner{
+    width:16px;height:16px;
+    border:2.5px solid var(--border);
+    border-top-color:var(--accent);
+    border-radius:50%;
+    display:inline-block;
+    animation:spin 0.7s linear infinite;
+    vertical-align:middle;
+    margin-right:8px;
+  }
+  @keyframes spin{to{transform:rotate(360deg);}}
+  .db-row{
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    gap:10px;
+    margin-top:4px;
+  }
+  .db-label{
+    font-size:0.78rem;
+    color:var(--muted);
+  }
+  .db-select{
+    font-family:inherit;
+    font-size:0.82rem;
+    font-weight:600;
+    color:var(--text);
+    background:var(--card);
+    border:1px solid var(--border);
+    border-radius:8px;
+    padding:6px 10px;
+  }
+  .db-select:disabled{
+    opacity:0.6;
+  }
+  footer{
+    text-align:center;
+    color:var(--muted);
+    font-size:0.72rem;
+    padding:20px 24px 0;
+    line-height:1.5;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Terrain Hex</h1>
+  <p id="subtitle">Live hex biome view centered on you</p>
+</header>
+
+<main>
+  <div id="status" class="status">Loading terrain database…</div>
+
+  <div class="card">
+    <div class="zoom-row">
+      <button id="zoomInBtn" class="zoom-btn" aria-label="Zoom in">+</button>
+      <div id="zoomLabel" class="zoom-label">25 rings</div>
+      <button id="zoomOutBtn" class="zoom-btn" aria-label="Zoom out">&minus;</button>
+    </div>
+    <canvas id="gridCanvas" width="336" height="336"></canvas>
+    <div class="label-row">
+      <div id="swatch" class="swatch" style="background:var(--nodata);"></div>
+      <div id="biomeName" class="biome-name">—</div>
+    </div>
+    <div id="metaRow" class="meta-row">&nbsp;</div>
+    <div class="action-row">
+      <button id="logBtn" class="primary-btn">Log Position</button>
+      <button id="refreshBtn" class="primary-btn">Refresh Now</button>
+    </div>
+    <a href="../log.html?back=terrain-hex/" class="log-link">View Log</a>
+  </div>
+
+  <div class="db-row">
+    <label for="dbSelect" class="db-label">Database</label>
+    <!-- Filled from databases.json, which a GitHub Action rebuilds from the *.sqlite files. -->
+    <select id="dbSelect" class="db-select" disabled></select>
+  </div>
+
+  <footer>
+    Updates automatically every 30 seconds. Terrain data: OSM extract, H3 resolution 11 hexes (~50&nbsp;m across).<br>
+    Map data © OpenStreetMap contributors.
+  </footer>
+</main>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.3/sql-wasm.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/h3-js@4.5.0/dist/h3-js.umd.js"></script>
+<script>
+(function(){
+  const statusEl = document.getElementById('status');
+  const canvas = document.getElementById('gridCanvas');
+  const ctx = canvas.getContext('2d');
+  const swatchEl = document.getElementById('swatch');
+  const biomeNameEl = document.getElementById('biomeName');
+  const metaRowEl = document.getElementById('metaRow');
+  const refreshBtn = document.getElementById('refreshBtn');
+  const subtitleEl = document.getElementById('subtitle');
+  const zoomLabelEl = document.getElementById('zoomLabel');
+  const zoomInBtn = document.getElementById('zoomInBtn');
+  const zoomOutBtn = document.getElementById('zoomOutBtn');
+  const dbSelect = document.getElementById('dbSelect');
+  const logBtn = document.getElementById('logBtn');
+
+  // databases.json lists each map as {file, label, gaps?}; the first entry is
+  // the default. A map's gaps file (X_gaps.sqlite) is preloaded and shown
+  // while the grid is held down.
+  const MANIFEST_FILE = 'databases.json';
+  const REQUIRED_TABLES = ['meta', 'categories', 'cells'];
+  let manifest = [];
+  const ZOOM_LEVELS = [10, 25, 50]; // rings of hexes around you, most zoomed in first
+  let zoomIndex = 1; // default: 25 rings
+  let RINGS = ZOOM_LEVELS[zoomIndex];
+  const QUERY_CHUNK = 500; // hex ids per SQL IN (...) query
+  const METERS_PER_DEGREE = 111320;
+  const REFRESH_MS = 30000;
+
+  let lastLat = null, lastLon = null;
+
+  const COLORS = {
+    'Grassy':            '#b7d98c',
+    'Residential':       '#c9a97a',
+    'Forest':            '#2f6b2f',
+    'Park':              '#7fc97f',
+    'Cemetery':          '#9b9b9b',
+    'River':             '#3a7bd5',
+    'Lake':              '#1e4a8a',
+    'Green Residential': '#d9c48a',
+    'Stream':            '#6fb3d9',
+    'Gap':               '#000000'
+  };
+  const NODATA_COLOR = '#ffffff';
+
+  let SQL = null;
+  let db = null;
+  let meta = null;       // {res}: H3 resolution of the active database
+  let categories = null; // {id: name}
+  let refreshTimer = null;
+  const dbCache = new Map(); // filename -> {db, meta, categories}
+
+  function setStatus(html, isError){
+    statusEl.innerHTML = html || '';
+    statusEl.className = 'status' + (isError ? ' error' : '');
+  }
+
+  const DB_COOKIE = 'terrainHexDb';
+  const LOG_DB_PREFIX = 'terrain-hex/'; // the log is shared with the square page
+  const LOG_KEY = 'terrainPositionLog';
+
+  function readLog(){
+    try{ return JSON.parse(localStorage.getItem(LOG_KEY) || '[]'); }
+    catch(e){ return []; }
+  }
+
+  function writeLog(log){
+    localStorage.setItem(LOG_KEY, JSON.stringify(log));
+  }
+
+  // Looks up the biome for one exact point against a specific (already-
+  // loaded) database entry -- independent of whatever is currently drawn
+  // on screen, so logging always reflects the selected database even
+  // mid-hold on the gap overlay.
+  function lookupBiome(entry, lat, lon){
+    const cell = h3.latLngToCell(lat, lon, entry.meta.res);
+    const stmt = entry.db.prepare('SELECT category FROM cells WHERE h3 = ?');
+    stmt.bind([cell]);
+    let biome = 'Outside mapped area';
+    if(stmt.step()){
+      biome = entry.categories[stmt.get()[0]] || 'Unknown';
+    }
+    stmt.free();
+    return biome;
+  }
+
+  function setCookie(name, value, days){
+    const expires = new Date(Date.now() + days * 86400000).toUTCString();
+    document.cookie = name + '=' + encodeURIComponent(value) + ';expires=' + expires + ';path=/;samesite=lax';
+  }
+
+  function getCookie(name){
+    const match = document.cookie.match(new RegExp('(?:^|; )' + name + '=([^;]*)'));
+    return match ? decodeURIComponent(match[1]) : null;
+  }
+
+  // Fetches+parses a database into dbCache if not already cached, without
+  // touching which one is currently "active" -- lets us preload a gaps file in
+  // the background while a different database stays on screen.
+  async function ensureLoaded(filename){
+    let entry = dbCache.get(filename);
+    if(!entry){
+      let r;
+      try{
+        r = await fetch(encodeURIComponent(filename));
+      } catch(e){
+        throw new Error(filename + ': network error, check your connection');
+      }
+      if(!r.ok) throw new Error(filename + ': HTTP ' + r.status);
+      const buf = await r.arrayBuffer();
+
+      let database;
+      try{
+        database = new SQL.Database(new Uint8Array(buf));
+        const tables = database.exec("SELECT name FROM sqlite_master WHERE type='table'");
+        const tableNames = tables.length ? tables[0].values.map(v => v[0]) : [];
+        const missing = REQUIRED_TABLES.filter(t => !tableNames.includes(t));
+        if(missing.length) throw new Error('missing table(s) ' + missing.join(', '));
+      } catch(e){
+        throw new Error(filename + ': not a valid terrain database (' + e.message + ')');
+      }
+
+      const metaRows = database.exec('SELECT key, value FROM meta');
+      const m = {};
+      (metaRows.length ? metaRows[0].values : []).forEach(([k, v]) => { m[k] = v; });
+      const res = parseInt(m.h3_resolution, 10);
+      if(m.grid !== 'h3' || !(res >= 0 && res <= 15)){
+        throw new Error(filename + ': not an H3 hex database (meta grid/h3_resolution)');
+      }
+      const parsedMeta = { res: res };
+
+      const parsedCategories = {};
+      const catRows = database.exec('SELECT id, name FROM categories');
+      (catRows.length ? catRows[0].values : []).forEach(([id, name]) => {
+        parsedCategories[id] = name;
+      });
+      // Categories without a colour would otherwise silently render as no-data white.
+      const uncolored = Object.values(parsedCategories).filter(name => !(name in COLORS));
+
+      entry = { db: database, meta: parsedMeta, categories: parsedCategories, uncolored: uncolored };
+      dbCache.set(filename, entry);
+    }
+    return entry;
+  }
+
+  function setActive(entry){
+    db = entry.db;
+    meta = entry.meta;
+    categories = entry.categories;
+  }
+
+  async function loadDatabase(filename){
+    const entry = await ensureLoaded(filename);
+    setActive(entry);
+    const gaps = gapsFileFor(filename);
+    if(gaps) ensureLoaded(gaps).catch(e => console.error('Gap data preload failed', e));
+    return entry;
+  }
+
+  function gapsFileFor(filename){
+    const item = manifest.find(d => d.file === filename);
+    return item && item.gaps ? item.gaps : null;
+  }
+
+  // Clears the status line, or notes any categories the page has no colour for.
+  function showLoadedStatus(entry){
+    if(entry.uncolored.length){
+      setStatus('Note: no colour defined for ' + escapeHtml(entry.uncolored.join(', ')) + ' (shown as white).');
+    } else {
+      setStatus('');
+    }
+  }
+
+  function escapeHtml(s){
+    return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  }
+
+  async function loadManifest(){
+    let r;
+    try{
+      r = await fetch(MANIFEST_FILE, { cache: 'no-cache' });
+    } catch(e){
+      throw new Error(MANIFEST_FILE + ': network error, check your connection');
+    }
+    if(!r.ok) throw new Error(MANIFEST_FILE + ': HTTP ' + r.status);
+    let list;
+    try{
+      list = await r.json();
+    } catch(e){
+      throw new Error(MANIFEST_FILE + ': not valid JSON');
+    }
+    list = Array.isArray(list) ? list.filter(d => d && typeof d.file === 'string') : [];
+    if(!list.length) throw new Error(MANIFEST_FILE + ': no databases listed');
+    return list;
+  }
+
+  function redrawFromLastFix(){
+    if(lastLat !== null){
+      updateGrid(lastLat, lastLon);
+    } else {
+      drawEmptyGrid();
+    }
+  }
+
+  async function init(){
+    try{
+      SQL = await initSqlJs({
+        locateFile: file => 'https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.3/' + file
+      });
+
+      manifest = await loadManifest();
+      manifest.forEach(d => {
+        const opt = document.createElement('option');
+        opt.value = d.file;
+        opt.textContent = d.label || d.file;
+        dbSelect.appendChild(opt);
+      });
+
+      const savedDb = getCookie(DB_COOKIE);
+      const initialDb = manifest.some(d => d.file === savedDb) ? savedDb : manifest[0].file;
+      dbSelect.value = initialDb;
+      dbSelect.disabled = false;
+      showLoadedStatus(await loadDatabase(initialDb));
+
+      updateZoomUI();
+      drawEmptyGrid();
+      locate();
+      refreshTimer = setInterval(locate, REFRESH_MS);
+    } catch(e){
+      console.error(e);
+      setStatus('Could not load the terrain database: ' + escapeHtml(e.message) + '. Reload to try again.', true);
+    }
+  }
+
+  dbSelect.addEventListener('change', async () => {
+    dbSelect.disabled = true;
+    setStatus('<span class="spinner"></span> Loading database…');
+    try{
+      const entry = await loadDatabase(dbSelect.value);
+      setCookie(DB_COOKIE, dbSelect.value, 365);
+      showLoadedStatus(entry);
+      redrawFromLastFix();
+    } catch(e){
+      console.error(e);
+      setStatus('Could not load that database: ' + escapeHtml(e.message) + '.', true);
+    } finally {
+      dbSelect.disabled = false;
+    }
+  });
+
+  // Press-and-hold on the grid temporarily peeks at the selected map's gap-fill
+  // overlay (its X_gaps.sqlite), reverting as soon as it's released. Does
+  // nothing for maps that have no gaps file.
+  let holding = false;
+
+  canvas.addEventListener('pointerdown', async (e) => {
+    const gapsFile = gapsFileFor(dbSelect.value);
+    if(!gapsFile) return;
+    e.preventDefault();
+    holding = true;
+    dbSelect.disabled = true;
+    try{
+      const gapEntry = await ensureLoaded(gapsFile);
+      if(!holding) return; // released before the (rare) cold-load finished
+      setActive(gapEntry);
+      redrawFromLastFix();
+    } catch(e){
+      console.error('Could not load gap data', e);
+      setStatus('Could not load gap data: ' + escapeHtml(e.message) + '.', true);
+      holding = false;
+      dbSelect.disabled = false;
+    }
+  });
+
+  function releaseHold(){
+    if(!holding) return;
+    holding = false;
+    dbSelect.disabled = false;
+    const entry = dbCache.get(dbSelect.value);
+    if(entry){
+      setActive(entry);
+      redrawFromLastFix();
+    }
+  }
+
+  canvas.addEventListener('pointerup', releaseHold);
+  canvas.addEventListener('pointercancel', releaseHold);
+  canvas.addEventListener('pointerleave', releaseHold);
+
+  logBtn.addEventListener('click', () => {
+    if(lastLat === null){
+      setStatus('No location yet -- tap Refresh Now first.', true);
+      return;
+    }
+    const description = prompt('Description for this log entry (optional):', '');
+    if(description === null) return; // cancelled
+
+    const filename = dbSelect.value;
+    const entry = dbCache.get(filename);
+    const biome = entry ? lookupBiome(entry, lastLat, lastLon) : 'Unknown';
+
+    const log = readLog();
+    log.push({
+      time: new Date().toISOString(),
+      lat: lastLat,
+      lon: lastLon,
+      database: LOG_DB_PREFIX + filename,
+      biome: biome,
+      description: description
+    });
+    writeLog(log);
+
+    setStatus('Position logged.');
+    setTimeout(() => { if(statusEl.textContent === 'Position logged.') setStatus(''); }, 2000);
+  });
+
+  // Sizes the canvas backing store to its on-screen size so hex edges stay sharp.
+  function fitCanvas(){
+    const dpr = window.devicePixelRatio || 1;
+    const cssSize = canvas.clientWidth || 336;
+    const px = Math.round(cssSize * dpr);
+    if(canvas.width !== px || canvas.height !== px){
+      canvas.width = px;
+      canvas.height = px;
+    }
+    return px;
+  }
+
+  function drawEmptyGrid(){
+    fitCanvas();
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+  }
+
+  function updateZoomUI(){
+    zoomLabelEl.textContent = RINGS + ' rings';
+    subtitleEl.textContent = 'Live hex biome view, ' + RINGS + ' rings around you';
+    zoomInBtn.disabled = (zoomIndex === 0);
+    zoomOutBtn.disabled = (zoomIndex === ZOOM_LEVELS.length - 1);
+  }
+
+  function setZoom(newIndex){
+    newIndex = Math.max(0, Math.min(ZOOM_LEVELS.length - 1, newIndex));
+    if(newIndex === zoomIndex) return;
+    zoomIndex = newIndex;
+    RINGS = ZOOM_LEVELS[zoomIndex];
+    updateZoomUI();
+    redrawFromLastFix();
+  }
+
+  window.addEventListener('resize', redrawFromLastFix);
+  zoomInBtn.addEventListener('click', () => setZoom(zoomIndex - 1));
+  zoomOutBtn.addEventListener('click', () => setZoom(zoomIndex + 1));
+  refreshBtn.addEventListener('click', locate);
+
+  function locate(){
+    if(!('geolocation' in navigator)){
+      setStatus('Geolocation is not available in this browser.', true);
+      return;
+    }
+    refreshBtn.disabled = true;
+    setStatus('<span class="spinner"></span> Getting your location…');
+
+    navigator.geolocation.getCurrentPosition(onPosition, onPositionError, {
+      enableHighAccuracy: true,
+      timeout: 15000,
+      maximumAge: 0
+    });
+  }
+
+  function onPositionError(err){
+    refreshBtn.disabled = false;
+    let msg = 'Could not get your location.';
+    if(err.code === err.PERMISSION_DENIED){
+      msg = 'Location permission denied. Allow location access for this page and try again.';
+    } else if(err.code === err.TIMEOUT){
+      msg = 'Location request timed out. Try again outdoors.';
+    }
+    setStatus(msg, true);
+  }
+
+  function onPosition(pos){
+    refreshBtn.disabled = false;
+    const lat = pos.coords.latitude;
+    const lon = pos.coords.longitude;
+    lastLat = lat;
+    lastLon = lon;
+    metaRowEl.textContent = new Date(pos.timestamp).toLocaleTimeString() + ' · ±' + Math.round(pos.coords.accuracy) + ' m';
+    setStatus('');
+    updateGrid(lat, lon);
+  }
+
+  function updateGrid(lat, lon){
+    const center = h3.latLngToCell(lat, lon, meta.res);
+    const cells = h3.gridDisk(center, RINGS);
+
+    const data = new Map();
+    for(let i = 0; i < cells.length; i += QUERY_CHUNK){
+      const chunk = cells.slice(i, i + QUERY_CHUNK);
+      const stmt = db.prepare('SELECT h3, category FROM cells WHERE h3 IN (' + chunk.map(() => '?').join(',') + ')');
+      stmt.bind(chunk);
+      while(stmt.step()){
+        const row = stmt.get();
+        data.set(row[0], row[1]);
+      }
+      stmt.free();
+    }
+
+    // Local flat projection around the centre hex (metres east/north), which
+    // is plenty accurate over the ~2.5 km the widest view covers.
+    const [lat0, lng0] = h3.cellToLatLng(center);
+    const mLng = METERS_PER_DEGREE * Math.cos(lat0 * Math.PI / 180);
+    const shapes = cells.map(cell => ({
+      cell: cell,
+      pts: h3.cellToBoundary(cell).map(([la, ln]) => [(ln - lng0) * mLng, (la - lat0) * METERS_PER_DEGREE])
+    }));
+    let extent = 0;
+    shapes.forEach(sh => sh.pts.forEach(([x, y]) => { extent = Math.max(extent, Math.abs(x), Math.abs(y)); }));
+
+    const size = fitCanvas();
+    const half = size / 2;
+    const scale = half / (extent || 1);
+    ctx.clearRect(0, 0, size, size);
+    ctx.lineJoin = 'round';
+    ctx.lineWidth = 1; // same-colour stroke hides hairline seams between hexes
+
+    function tracePath(pts){
+      ctx.beginPath();
+      pts.forEach(([x, y], k) => {
+        // North up: canvas y grows downwards, so flip the northing.
+        const px = half + x * scale, py = half - y * scale;
+        if(k === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+      });
+      ctx.closePath();
+    }
+
+    shapes.forEach(sh => {
+      const cat = data.get(sh.cell);
+      const color = cat !== undefined ? (COLORS[categories[cat]] || NODATA_COLOR) : NODATA_COLOR;
+      tracePath(sh.pts);
+      ctx.fillStyle = color;
+      ctx.strokeStyle = color;
+      ctx.fill();
+      ctx.stroke();
+    });
+
+    // Red outline on the hex you are standing in.
+    const outline = getComputedStyle(document.documentElement).getPropertyValue('--center-outline').trim() || '#c80000';
+    const edgePx = h3.getHexagonEdgeLengthAvg(meta.res, h3.UNITS.m) * scale;
+    tracePath(shapes.find(sh => sh.cell === center).pts);
+    ctx.strokeStyle = outline;
+    ctx.lineWidth = Math.max(2, edgePx * 0.25);
+    ctx.stroke();
+
+    const centerCat = data.get(center);
+    if(centerCat !== undefined){
+      const name = categories[centerCat];
+      swatchEl.style.background = COLORS[name] || NODATA_COLOR;
+      biomeNameEl.textContent = name;
+    } else {
+      swatchEl.style.background = NODATA_COLOR;
+      biomeNameEl.textContent = 'Outside mapped area';
+    }
+  }
+
+  init();
+})();
+</script>
+
+</body>
+</html>

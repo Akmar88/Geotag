@@ -144,7 +144,7 @@
 
 <header>
   <h1>Position Log</h1>
-  <a href="terrain-test.html">&larr; Back to grid</a>
+  <a id="backLink" href="terrain-test.html">&larr; Back to grid</a>
 </header>
 
 <main>
@@ -159,6 +159,13 @@
 <script>
 (function(){
   const LOG_KEY = 'terrainPositionLog';
+
+  // ?back=terrain-hex/ sends "Back to grid" to the hex page; only known pages
+  // are accepted so the link can't be pointed anywhere else.
+  const BACK_PAGES = ['terrain-test.html', 'terrain-hex/'];
+  const back = new URLSearchParams(location.search).get('back');
+  if(BACK_PAGES.includes(back)) document.getElementById('backLink').href = back;
+
   const entriesEl = document.getElementById('entries');
   const countEl = document.getElementById('count');
   const copyBtn = document.getElementById('copyBtn');
