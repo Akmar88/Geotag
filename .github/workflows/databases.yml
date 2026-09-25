@@ -1,13 +1,16 @@
 name: Update databases.json
 
-# Rebuilds the Terrain Grid database list whenever a .sqlite file (or the
-# generator itself) changes, and commits the result back to the same branch.
+# Rebuilds the Terrain Grid database lists (repo root and terrain-hex/) whenever
+# a .sqlite file (or the generator itself) changes, and commits the result back
+# to the same branch.
 # Fails if a database is malformed or a *_gaps.sqlite file doesn't match its map.
 on:
   push:
     paths:
       - '*.sqlite'
       - 'databases.json'
+      - 'terrain-hex/*.sqlite'
+      - 'terrain-hex/databases.json'
       - 'scripts/build_databases_json.py'
       - '.github/workflows/databases.yml'
   workflow_dispatch:
@@ -36,12 +39,12 @@ jobs:
         # Runs even when validation failed, so valid new maps still show up.
         if: ${{ !cancelled() }}
         run: |
-          if git diff --quiet -- databases.json; then
+          if git diff --quiet -- databases.json terrain-hex/databases.json; then
             echo "databases.json is up to date"
             exit 0
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add databases.json
+          git add databases.json terrain-hex/databases.json
           git commit -m "Update databases.json"
           git push

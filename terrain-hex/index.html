@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
 <meta name="theme-color" content="#0f3d2e">
-<title>Terrain Grid</title>
+<title>Terrain Hex</title>
 <style>
   :root{
     --bg:#f4f6f4;
@@ -75,8 +75,6 @@
     width:100%;
     max-width:336px;
     aspect-ratio:1/1;
-    image-rendering:pixelated;
-    image-rendering:crisp-edges;
     border-radius:8px;
     border:1px solid var(--border);
     display:block;
@@ -267,14 +265,14 @@
 <body>
 
 <header>
-  <h1>Terrain Grid</h1>
-  <p id="subtitle">Live biome view centered on you</p>
+  <h1>Terrain Hex</h1>
+  <p id="subtitle">Live hex biome view centered on you</p>
 </header>
 
 <main>
   <nav class="view-switch" aria-label="Map type">
-    <a aria-current="page">Grid</a>
-    <a id="switchLink" href="terrain-hex/">Hex</a>
+    <a id="switchLink" href="../terrain-test.html">Grid</a>
+    <a aria-current="page">Hex</a>
   </nav>
 
   <div id="status" class="status">Loading terrain database…</div>
@@ -282,10 +280,10 @@
   <div class="card">
     <div class="zoom-row">
       <button id="zoomInBtn" class="zoom-btn" aria-label="Zoom in">+</button>
-      <div id="zoomLabel" class="zoom-label">51&times;51</div>
+      <div id="zoomLabel" class="zoom-label">34 rings</div>
       <button id="zoomOutBtn" class="zoom-btn" aria-label="Zoom out">&minus;</button>
     </div>
-    <canvas id="gridCanvas" width="51" height="51"></canvas>
+    <canvas id="gridCanvas" width="336" height="336"></canvas>
     <div class="label-row">
       <div id="swatch" class="swatch" style="background:var(--nodata);"></div>
       <div id="biomeName" class="biome-name">—</div>
@@ -295,7 +293,7 @@
       <button id="logBtn" class="primary-btn">Log Position</button>
       <button id="refreshBtn" class="primary-btn">Refresh Now</button>
     </div>
-    <a href="log.html" class="log-link">View Log</a>
+    <a href="../log.html?back=terrain-hex/" class="log-link">View Log</a>
   </div>
 
   <div class="db-row">
@@ -305,12 +303,13 @@
   </div>
 
   <footer>
-    Updates automatically every 30 seconds. Terrain data: OSM extract, 25m grid.<br>
+    Updates automatically every 30 seconds. Terrain data: OSM extract, H3 resolution 12 hexes (~19&nbsp;m across).<br>
     Map data © OpenStreetMap contributors.
   </footer>
 </main>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.3/sql-wasm.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/h3-js@4.5.0/dist/h3-js.umd.js"></script>
 <script>
 (function(){
   const statusEl = document.getElementById('status');
@@ -333,14 +332,16 @@
   // while the grid is held down.
   const MANIFEST_FILE = 'databases.json';
   const REQUIRED_TABLES = ['meta', 'categories', 'cells'];
-  const SWITCH_TARGET = 'terrain-hex/';
-  const REQUIRED_META = ['origin_lon', 'origin_lat', 'meters_per_degree_lon', 'meters_per_degree_lat',
-                         'cell_size_m', 'grid_width_cols', 'grid_height_rows'];
   let manifest = [];
-  const ZOOM_LEVELS = [21, 51, 101]; // smallest (most zoomed in) to largest
-  let zoomIndex = 1; // default: 51x51
-  let GRID_SIZE = ZOOM_LEVELS[zoomIndex];
-  let GRID_RADIUS = (GRID_SIZE - 1) / 2;
+  // Rings of hexes around you, most zoomed in first. At resolution 12 these
+  // make the map ~530 / 1260 / 2530 m wide, matching the square page's
+  // 21 / 51 / 101 cells of 25 m.
+  const ZOOM_LEVELS = [14, 34, 69];
+  let zoomIndex = 1; // default: 34 rings
+  let RINGS = ZOOM_LEVELS[zoomIndex];
+  const QUERY_CHUNK = 500; // hex ids per SQL IN (...) query
+  const METERS_PER_DEGREE = 111320;
+  const SWITCH_TARGET = '../terrain-test.html';
   const REFRESH_MS = 30000;
 
   let lastLat = null, lastLon = null;
@@ -361,7 +362,7 @@
 
   let SQL = null;
   let db = null;
-  let meta = null;       // {origin_lon, origin_lat, mlon, mlat, cellSize, width, height}
+  let meta = null;       // {res}: H3 resolution of the active database
   let categories = null; // {id: name}
   let refreshTimer = null;
   const dbCache = new Map(); // filename -> {db, meta, categories}
@@ -371,7 +372,8 @@
     statusEl.className = 'status' + (isError ? ' error' : '');
   }
 
-  const DB_COOKIE = 'terrainDb';
+  const DB_COOKIE = 'terrainHexDb';
+  const LOG_DB_PREFIX = 'terrain-hex/'; // the log is shared with the square page
   const LOG_KEY = 'terrainPositionLog';
 
   function readLog(){
@@ -388,14 +390,9 @@
   // on screen, so logging always reflects the selected database even
   // mid-hold on the gap overlay.
   function lookupBiome(entry, lat, lon){
-    const col = Math.floor((lon - entry.meta.originLon) * entry.meta.mLon / entry.meta.cellSize);
-    const row = Math.floor((lat - entry.meta.originLat) * entry.meta.mLat / entry.meta.cellSize);
-    if(row < 0 || row >= entry.meta.height || col < 0 || col >= entry.meta.width){
-      return 'Outside mapped area';
-    }
-    const cellId = row * entry.meta.width + col;
-    const stmt = entry.db.prepare('SELECT category FROM cells WHERE cell_id = ?');
-    stmt.bind([cellId]);
+    const cell = h3.latLngToCell(lat, lon, entry.meta.res);
+    const stmt = entry.db.prepare('SELECT category FROM cells WHERE h3 = ?');
+    stmt.bind([cell]);
     let biome = 'Outside mapped area';
     if(stmt.step()){
       biome = entry.categories[stmt.get()[0]] || 'Unknown';
@@ -443,19 +440,11 @@
       const metaRows = database.exec('SELECT key, value FROM meta');
       const m = {};
       (metaRows.length ? metaRows[0].values : []).forEach(([k, v]) => { m[k] = v; });
-      const badKeys = REQUIRED_META.filter(k => !isFinite(parseFloat(m[k])));
-      if(badKeys.length){
-        throw new Error(filename + ': meta key(s) missing or not a number: ' + badKeys.join(', '));
+      const res = parseInt(m.h3_resolution, 10);
+      if(m.grid !== 'h3' || !(res >= 0 && res <= 15)){
+        throw new Error(filename + ': not an H3 hex database (meta grid/h3_resolution)');
       }
-      const parsedMeta = {
-        originLon: parseFloat(m.origin_lon),
-        originLat: parseFloat(m.origin_lat),
-        mLon: parseFloat(m.meters_per_degree_lon),
-        mLat: parseFloat(m.meters_per_degree_lat),
-        cellSize: parseFloat(m.cell_size_m),
-        width: parseInt(m.grid_width_cols, 10),
-        height: parseInt(m.grid_height_rows, 10)
-      };
+      const parsedMeta = { res: res };
 
       const parsedCategories = {};
       const catRows = database.exec('SELECT id, name FROM categories');
@@ -645,7 +634,7 @@
       time: new Date().toISOString(),
       lat: lastLat,
       lon: lastLon,
-      database: filename,
+      database: LOG_DB_PREFIX + filename,
       biome: biome,
       description: description
     });
@@ -655,14 +644,26 @@
     setTimeout(() => { if(statusEl.textContent === 'Position logged.') setStatus(''); }, 2000);
   });
 
+  // Sizes the canvas backing store to its on-screen size so hex edges stay sharp.
+  function fitCanvas(){
+    const dpr = window.devicePixelRatio || 1;
+    const cssSize = canvas.clientWidth || 336;
+    const px = Math.round(cssSize * dpr);
+    if(canvas.width !== px || canvas.height !== px){
+      canvas.width = px;
+      canvas.height = px;
+    }
+    return px;
+  }
+
   function drawEmptyGrid(){
-    ctx.fillStyle = NODATA_COLOR;
-    ctx.fillRect(0, 0, GRID_SIZE, GRID_SIZE);
+    fitCanvas();
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
   }
 
   function updateZoomUI(){
-    zoomLabelEl.textContent = GRID_SIZE + '×' + GRID_SIZE;
-    subtitleEl.textContent = 'Live ' + GRID_SIZE + '×' + GRID_SIZE + ' biome view centered on you';
+    zoomLabelEl.textContent = RINGS + ' rings';
+    subtitleEl.textContent = 'Live hex biome view, ' + RINGS + ' rings around you';
     zoomInBtn.disabled = (zoomIndex === 0);
     zoomOutBtn.disabled = (zoomIndex === ZOOM_LEVELS.length - 1);
   }
@@ -671,14 +672,12 @@
     newIndex = Math.max(0, Math.min(ZOOM_LEVELS.length - 1, newIndex));
     if(newIndex === zoomIndex) return;
     zoomIndex = newIndex;
-    GRID_SIZE = ZOOM_LEVELS[zoomIndex];
-    GRID_RADIUS = (GRID_SIZE - 1) / 2;
-    canvas.width = GRID_SIZE;
-    canvas.height = GRID_SIZE;
+    RINGS = ZOOM_LEVELS[zoomIndex];
     updateZoomUI();
     redrawFromLastFix();
   }
 
+  window.addEventListener('resize', redrawFromLastFix);
   zoomInBtn.addEventListener('click', () => setZoom(zoomIndex - 1));
   zoomOutBtn.addEventListener('click', () => setZoom(zoomIndex + 1));
   refreshBtn.addEventListener('click', locate);
@@ -721,26 +720,14 @@
   }
 
   function updateGrid(lat, lon){
-    const xM = (lon - meta.originLon) * meta.mLon;
-    const yM = (lat - meta.originLat) * meta.mLat;
-    const col0 = Math.floor(xM / meta.cellSize);
-    const row0 = Math.floor(yM / meta.cellSize);
-
-    const clauses = [];
-    const params = [];
-    for(let r = row0 - GRID_RADIUS; r <= row0 + GRID_RADIUS; r++){
-      if(r < 0 || r >= meta.height) continue;
-      const cLo = Math.max(0, col0 - GRID_RADIUS);
-      const cHi = Math.min(meta.width - 1, col0 + GRID_RADIUS);
-      if(cLo > cHi) continue;
-      clauses.push('cell_id BETWEEN ? AND ?');
-      params.push(r * meta.width + cLo, r * meta.width + cHi);
-    }
+    const center = h3.latLngToCell(lat, lon, meta.res);
+    const cells = h3.gridDisk(center, RINGS);
 
     const data = new Map();
-    if(clauses.length){
-      const stmt = db.prepare('SELECT cell_id, category FROM cells WHERE ' + clauses.join(' OR '));
-      stmt.bind(params);
+    for(let i = 0; i < cells.length; i += QUERY_CHUNK){
+      const chunk = cells.slice(i, i + QUERY_CHUNK);
+      const stmt = db.prepare('SELECT h3, category FROM cells WHERE h3 IN (' + chunk.map(() => '?').join(',') + ')');
+      stmt.bind(chunk);
       while(stmt.step()){
         const row = stmt.get();
         data.set(row[0], row[1]);
@@ -748,35 +735,53 @@
       stmt.free();
     }
 
-    const imgData = ctx.createImageData(GRID_SIZE, GRID_SIZE);
-    for(let dr = -GRID_RADIUS; dr <= GRID_RADIUS; dr++){
-      for(let dc = -GRID_RADIUS; dc <= GRID_RADIUS; dc++){
-        const r = row0 + dr, c = col0 + dc;
-        let color = NODATA_COLOR;
-        if(r >= 0 && r < meta.height && c >= 0 && c < meta.width){
-          const cellId = r * meta.width + c;
-          const cat = data.get(cellId);
-          if(cat !== undefined){
-            color = COLORS[categories[cat]] || NODATA_COLOR;
-          }
-        }
-        // Canvas row 0 is the top of the image, so north (larger dr) must map
-        // to the smallest pixel row for a conventional north-up display.
-        const pixelRow = GRID_RADIUS - dr;
-        const pixelCol = dc + GRID_RADIUS;
-        const px = pixelRow * GRID_SIZE + pixelCol;
-        const [rr, gg, bb] = hexToRgb(color);
-        imgData.data[px*4] = rr;
-        imgData.data[px*4+1] = gg;
-        imgData.data[px*4+2] = bb;
-        imgData.data[px*4+3] = 255;
-      }
-    }
-    ctx.putImageData(imgData, 0, 0);
-    drawCenterOutline();
+    // Local flat projection around the centre hex (metres east/north), which
+    // is plenty accurate over the ~2.5 km the widest view covers.
+    const [lat0, lng0] = h3.cellToLatLng(center);
+    const mLng = METERS_PER_DEGREE * Math.cos(lat0 * Math.PI / 180);
+    const shapes = cells.map(cell => ({
+      cell: cell,
+      pts: h3.cellToBoundary(cell).map(([la, ln]) => [(ln - lng0) * mLng, (la - lat0) * METERS_PER_DEGREE])
+    }));
+    let extent = 0;
+    shapes.forEach(sh => sh.pts.forEach(([x, y]) => { extent = Math.max(extent, Math.abs(x), Math.abs(y)); }));
 
-    const centerId = row0 * meta.width + col0;
-    const centerCat = data.get(centerId);
+    const size = fitCanvas();
+    const half = size / 2;
+    const scale = half / (extent || 1);
+    ctx.clearRect(0, 0, size, size);
+    ctx.lineJoin = 'round';
+    ctx.lineWidth = 1; // same-colour stroke hides hairline seams between hexes
+
+    function tracePath(pts){
+      ctx.beginPath();
+      pts.forEach(([x, y], k) => {
+        // North up: canvas y grows downwards, so flip the northing.
+        const px = half + x * scale, py = half - y * scale;
+        if(k === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+      });
+      ctx.closePath();
+    }
+
+    shapes.forEach(sh => {
+      const cat = data.get(sh.cell);
+      const color = cat !== undefined ? (COLORS[categories[cat]] || NODATA_COLOR) : NODATA_COLOR;
+      tracePath(sh.pts);
+      ctx.fillStyle = color;
+      ctx.strokeStyle = color;
+      ctx.fill();
+      ctx.stroke();
+    });
+
+    // Red outline on the hex you are standing in.
+    const outline = getComputedStyle(document.documentElement).getPropertyValue('--center-outline').trim() || '#c80000';
+    const edgePx = h3.getHexagonEdgeLengthAvg(meta.res, h3.UNITS.m) * scale;
+    tracePath(shapes.find(sh => sh.cell === center).pts);
+    ctx.strokeStyle = outline;
+    ctx.lineWidth = Math.max(2, edgePx * 0.25);
+    ctx.stroke();
+
+    const centerCat = data.get(center);
     if(centerCat !== undefined){
       const name = categories[centerCat];
       swatchEl.style.background = COLORS[name] || NODATA_COLOR;
@@ -785,35 +790,6 @@
       swatchEl.style.background = NODATA_COLOR;
       biomeNameEl.textContent = 'Outside mapped area';
     }
-  }
-
-  function drawCenterOutline(){
-    const cx = GRID_RADIUS, cy = GRID_RADIUS;
-    const outline = getComputedStyle(document.documentElement).getPropertyValue('--center-outline').trim() || '#c80000';
-    const [r, g, b] = hexToRgb(outline);
-    ctx.save();
-    const imgData = ctx.getImageData(0, 0, GRID_SIZE, GRID_SIZE);
-    setPixel(imgData, cx, cy, r, g, b);
-    ctx.putImageData(imgData, 0, 0);
-    ctx.restore();
-  }
-
-  function setPixel(imgData, x, y, r, g, b){
-    if(x < 0 || y < 0 || x >= GRID_SIZE || y >= GRID_SIZE) return;
-    const i = (y * GRID_SIZE + x) * 4;
-    imgData.data[i] = r;
-    imgData.data[i+1] = g;
-    imgData.data[i+2] = b;
-    imgData.data[i+3] = 255;
-  }
-
-  function hexToRgb(hex){
-    const h = hex.replace('#', '');
-    return [
-      parseInt(h.substring(0,2), 16),
-      parseInt(h.substring(2,4), 16),
-      parseInt(h.substring(4,6), 16)
-    ];
   }
 
   init();
